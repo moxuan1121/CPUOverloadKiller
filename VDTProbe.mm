@@ -8,6 +8,7 @@
 #define VDT_MARKER_PRIMARY @"/var/mobile/Library/Preferences/com.udevs.vedette.marker.plist"
 #define VDT_MARKER_FALLBACK @"/tmp/com.udevs.vedette.marker.plist"
 #define VDT_MARKER_MAX_EVENTS 40
+#define VDT_NOTIFY_MAX_EVENTS 40
 
 static dispatch_queue_t markerQueue(void){
     static dispatch_once_t once;
@@ -56,10 +57,60 @@ void VDTMarkerRecord(NSString *processName, pid_t pid, NSString *executablePath,
             NSNumber *cur = counters[processName];
             counters[processName] = @((cur ? [cur unsignedLongValue] : 0) + 1);
 
-            plist[@"version"] = @"1.1.4+marker1";
+            plist[@"version"] = @"1.1.4+marker2";
             plist[@"updatedAt"] = @([[NSDate date] timeIntervalSince1970]);
             plist[@"events"] = events;
             plist[@"counters"] = counters;
+            plist[@"primaryPath"] = VDT_MARKER_PRIMARY;
+            plist[@"fallbackPath"] = VDT_MARKER_FALLBACK;
+
+            [plist writeToFile:VDT_MARKER_PRIMARY atomically:YES];
+            [plist writeToFile:VDT_MARKER_FALLBACK atomically:YES];
+        }
+    });
+}
+
+void VDTNotifyPostRecord(NSString *processName, pid_t pid, NSString *identifier, BOOL isApplication){
+    if (!processName.length) return;
+
+    dispatch_async(markerQueue(), ^{
+        @autoreleasepool {
+            NSMutableDictionary *plist = [NSMutableDictionary dictionary];
+            NSMutableArray *events = [NSMutableArray array];
+
+            NSDictionary *existing = [NSDictionary dictionaryWithContentsOfFile:VDT_MARKER_PRIMARY];
+            if (existing){
+                [plist addEntriesFromDictionary:existing];
+                NSArray *oldEvents = existing[@"notifyEvents"];
+                if ([oldEvents isKindOfClass:[NSArray class]]){
+                    events = [NSMutableArray arrayWithArray:oldEvents];
+                }
+            }
+
+            [events addObject:@{
+                @"processName": processName ?: @"",
+                @"pid": @(pid),
+                @"identifier": identifier ?: @"",
+                @"isApplication": @(isApplication),
+                @"ts": @([[NSDate date] timeIntervalSince1970])
+            }];
+
+            if (events.count > VDT_NOTIFY_MAX_EVENTS){
+                [events removeObjectsInRange:NSMakeRange(0, events.count - VDT_NOTIFY_MAX_EVENTS)];
+            }
+
+            NSMutableDictionary *counters = [NSMutableDictionary dictionary];
+            NSDictionary *oldCounters = plist[@"notifyCounters"];
+            if ([oldCounters isKindOfClass:[NSDictionary class]]){
+                [counters addEntriesFromDictionary:oldCounters];
+            }
+            NSNumber *cur = counters[processName];
+            counters[processName] = @((cur ? [cur unsignedLongValue] : 0) + 1);
+
+            plist[@"version"] = @"1.1.4+marker2";
+            plist[@"updatedAt"] = @([[NSDate date] timeIntervalSince1970]);
+            plist[@"notifyEvents"] = events;
+            plist[@"notifyCounters"] = counters;
             plist[@"primaryPath"] = VDT_MARKER_PRIMARY;
             plist[@"fallbackPath"] = VDT_MARKER_FALLBACK;
 

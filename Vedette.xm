@@ -167,6 +167,7 @@ static void restoreAllMonitors(){
                         BOOL processEnabled = [valueForProcessConfigKeyWithPrefs((isApplication ? bundleIdentifier : processName), @"enabled", @NO, (isApplication ? VDTConfigTypeApp : VDTConfigTypeDaemon), weakPrefs) boolValue];
                         if (enabled && processEnabled){
                             HBLogDebug(@"Notify new pid: %d", [procInfo processIdentifier]);
+                            VDTNotifyPostRecord(processName, [procInfo processIdentifier], (isApplication ? bundleIdentifier : processName), isApplication);
                             notify_new_pid(NOTIFY_PID_NN, [procInfo processIdentifier]);
                         }
                     }

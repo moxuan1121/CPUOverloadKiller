@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 void VDTMarkerRecord(NSString *processName, pid_t pid, NSString *executablePath, BOOL isApplication, NSString *bundleIdentifier);
+void VDTNotifyPostRecord(NSString *processName, pid_t pid, NSString *identifier, BOOL isApplication);
 
 #ifdef __cplusplus
 }
