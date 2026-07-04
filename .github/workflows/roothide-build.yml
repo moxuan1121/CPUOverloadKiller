@@ -6,6 +6,7 @@ on:
     branches:
       - roothide-compat-test
       - roothide-no-rb-probe1
+      - roothide-stable-probe3
     paths:
       - '.github/workflows/roothide-build.yml'
       - '**/*.h'

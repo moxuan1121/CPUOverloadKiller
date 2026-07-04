@@ -49,7 +49,7 @@ void VDTProbeRecord(NSString *eventName, NSDictionary *payload){
                 [events removeObjectsInRange:NSMakeRange(0, events.count - VDT_PROBE_MAX_EVENTS)];
             }
             
-            plist[@"version"] = @"1.1.4+probe2";
+            plist[@"version"] = @"1.1.4+probe3";
             plist[@"updatedAt"] = @([[NSDate date] timeIntervalSince1970]);
             plist[@"events"] = events;
             plist[@"primaryPath"] = primaryPath;
