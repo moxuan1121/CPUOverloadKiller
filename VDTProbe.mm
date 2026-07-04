@@ -5,30 +5,28 @@
 
 #import "VDTProbe.h"
 
-#define VDT_PROBE_PRIMARY @"/var/mobile/Library/Preferences/com.udevs.vedette.probe.plist"
-#define VDT_PROBE_FALLBACK @"/tmp/com.udevs.vedette.probe.plist"
-#define VDT_PROBE_MAX_EVENTS 80
+#define VDT_MARKER_PRIMARY @"/var/mobile/Library/Preferences/com.udevs.vedette.marker.plist"
+#define VDT_MARKER_FALLBACK @"/tmp/com.udevs.vedette.marker.plist"
+#define VDT_MARKER_MAX_EVENTS 40
 
-static dispatch_queue_t probeQueue(void){
+static dispatch_queue_t markerQueue(void){
     static dispatch_once_t once;
     static dispatch_queue_t q;
     dispatch_once(&once, ^{
-        q = dispatch_queue_create("com.udevs.vedette.probe", DISPATCH_QUEUE_SERIAL);
+        q = dispatch_queue_create("com.udevs.vedette.marker", DISPATCH_QUEUE_SERIAL);
     });
     return q;
 }
 
-void VDTProbeRecord(NSString *eventName, NSDictionary *payload){
-    if (!eventName) return;
-    
-    dispatch_async(probeQueue(), ^{
+void VDTMarkerRecord(NSString *processName, pid_t pid, NSString *executablePath, BOOL isApplication, NSString *bundleIdentifier){
+    if (!processName.length) return;
+
+    dispatch_async(markerQueue(), ^{
         @autoreleasepool {
             NSMutableDictionary *plist = [NSMutableDictionary dictionary];
             NSMutableArray *events = [NSMutableArray array];
-            
-            // Try to load existing
-            NSString *primaryPath = VDT_PROBE_PRIMARY;
-            NSDictionary *existing = [NSDictionary dictionaryWithContentsOfFile:primaryPath];
+
+            NSDictionary *existing = [NSDictionary dictionaryWithContentsOfFile:VDT_MARKER_PRIMARY];
             if (existing){
                 [plist addEntriesFromDictionary:existing];
                 NSArray *oldEvents = existing[@"events"];
@@ -36,37 +34,37 @@ void VDTProbeRecord(NSString *eventName, NSDictionary *payload){
                     events = [NSMutableArray arrayWithArray:oldEvents];
                 }
             }
-            
-            // Add new event
+
             [events addObject:@{
-                @"event": eventName,
-                @"payload": payload ?: @{},
+                @"processName": processName ?: @"",
+                @"pid": @(pid),
+                @"executablePath": executablePath ?: @"",
+                @"isApplication": @(isApplication),
+                @"bundleIdentifier": bundleIdentifier ?: @"",
                 @"ts": @([[NSDate date] timeIntervalSince1970])
             }];
-            
-            // Trim to max
-            if (events.count > VDT_PROBE_MAX_EVENTS){
-                [events removeObjectsInRange:NSMakeRange(0, events.count - VDT_PROBE_MAX_EVENTS)];
+
+            if (events.count > VDT_MARKER_MAX_EVENTS){
+                [events removeObjectsInRange:NSMakeRange(0, events.count - VDT_MARKER_MAX_EVENTS)];
             }
-            
-            plist[@"version"] = @"1.1.4+probe3";
-            plist[@"updatedAt"] = @([[NSDate date] timeIntervalSince1970]);
-            plist[@"events"] = events;
-            plist[@"primaryPath"] = primaryPath;
-            plist[@"fallbackPath"] = VDT_PROBE_FALLBACK;
-            
-            // Update counters
+
             NSMutableDictionary *counters = [NSMutableDictionary dictionary];
             NSDictionary *oldCounters = plist[@"counters"];
             if ([oldCounters isKindOfClass:[NSDictionary class]]){
                 [counters addEntriesFromDictionary:oldCounters];
             }
-            NSNumber *cur = counters[eventName];
-            counters[eventName] = @((cur ? [cur unsignedLongValue] : 0) + 1);
+            NSNumber *cur = counters[processName];
+            counters[processName] = @((cur ? [cur unsignedLongValue] : 0) + 1);
+
+            plist[@"version"] = @"1.1.4+marker1";
+            plist[@"updatedAt"] = @([[NSDate date] timeIntervalSince1970]);
+            plist[@"events"] = events;
             plist[@"counters"] = counters;
-            
-            [plist writeToFile:primaryPath atomically:YES];
-            [plist writeToFile:VDT_PROBE_FALLBACK atomically:YES];
+            plist[@"primaryPath"] = VDT_MARKER_PRIMARY;
+            plist[@"fallbackPath"] = VDT_MARKER_FALLBACK;
+
+            [plist writeToFile:VDT_MARKER_PRIMARY atomically:YES];
+            [plist writeToFile:VDT_MARKER_FALLBACK atomically:YES];
         }
     });
 }

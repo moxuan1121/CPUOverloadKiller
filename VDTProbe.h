@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-void VDTProbeRecord(NSString *eventName, NSDictionary *payload);
+void VDTMarkerRecord(NSString *processName, pid_t pid, NSString *executablePath, BOOL isApplication, NSString *bundleIdentifier);
 
 #ifdef __cplusplus
 }

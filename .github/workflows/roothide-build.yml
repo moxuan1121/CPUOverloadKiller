@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - roothide-compat-test
+      - roothide-stable-marker1
       - roothide-no-rb-probe1
       - roothide-stable-probe3
     paths:
