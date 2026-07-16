@@ -3,9 +3,20 @@
 //  This file is subject to the terms and conditions defined in
 //  file 'LICENSE', which is part of this source code package.
 
+#import "Common.h"
 #import "VDTProbe.h"
 
-#define VDT_MARKER_PRIMARY @"/var/mobile/Library/Preferences/com.udevs.vedette.marker.plist"
+// Runtime-resolved marker path for roothide compatibility.
+static inline NSString *VDTMarkerPrimaryPath(void) {
+    static NSString *path;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        path = jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.marker.plist");
+    });
+    return path;
+}
+
+#define VDT_MARKER_PRIMARY VDTMarkerPrimaryPath()
 #define VDT_MARKER_FALLBACK @"/tmp/com.udevs.vedette.marker.plist"
 #define VDT_MARKER_MAX_EVENTS 40
 #define VDT_NOTIFY_MAX_EVENTS 40
@@ -118,4 +129,8 @@ void VDTNotifyPostRecord(NSString *processName, pid_t pid, NSString *identifier,
             [plist writeToFile:VDT_MARKER_FALLBACK atomically:YES];
         }
     });
+}
+
+void VDTProbeRecord(NSString *label, NSDictionary *info){
+    HBLogDebug(@"[VDTProbe] %@: %@", label, info);
 }
