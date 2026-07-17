@@ -457,6 +457,14 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
     @autoreleasepool {
         // Filter.Executables = ("runningboardd") ensures this only loads in runningboardd.
 
+        // Install RBProcessManager hook — MUST call %init() for %hook to take effect
+        %init();
+
+        // Canary: confirm dylib loaded and hooks installed
+        [@{@"loaded": @YES, @"hooksInstalled": @YES, @"time": [[NSDate date] description],
+           @"pid": @((int)[[NSProcessInfo processInfo] processIdentifier])}
+          writeToFile:@"/var/tmp/vedette-hook-canary.plist" atomically:YES];
+
         // Initial prefs load + apply monitoring to already-running processes
         reloadPrefs();
 
