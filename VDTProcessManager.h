@@ -8,11 +8,13 @@
 #include <libproc/libproc.h>
 #include <libproc/libproc_internal.h>
 
-extern NSDictionary *prefs;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Thread-safe prefs accessors. Use instead of direct global access.
+void VDTSetPrefs(NSDictionary *newPrefs);
+NSDictionary *VDTGetPrefs(void);
 
 NSArray* pids_with_identifier_and_type(NSArray <NSString *>*identifiers, NSArray <NSNumber *> *types);
 void monitor_pids(NSArray <NSNumber *> *pids, NSArray <NSNumber *> *percentages, NSArray <NSNumber *> *intervals);
