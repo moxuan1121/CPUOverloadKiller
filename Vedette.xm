@@ -455,15 +455,28 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
 
 %ctor{
     @autoreleasepool {
-        // Filter.Executables = ("runningboardd") ensures this only loads in runningboardd.
+        // === FIRST: canary to prove dylib loaded ===
+        // This runs BEFORE anything else, including %init
+        NSString *procName = [[[NSProcessInfo processInfo] arguments] firstObject];
+        [@{@"loaded": @YES,
+           @"time": [[NSDate date] description],
+           @"pid": @((int)[[NSProcessInfo processInfo] processIdentifier]),
+           @"process": procName ?: @"unknown",
+           @"processName": [[NSProcessInfo processInfo] processName] ?: @"unknown"}
+          writeToFile:@"/var/tmp/vedette-loaded.plist" atomically:YES];
+        // Also try /tmp in case /var/tmp is somehow restricted
+        [@{@"loaded": @YES, @"time": [[NSDate date] description]}
+          writeToFile:@"/tmp/vedette-loaded.plist" atomically:YES];
 
-        // Install RBProcessManager hook — MUST call %init() for %hook to take effect
-        %init();
-
-        // Canary: confirm dylib loaded and hooks installed
-        [@{@"loaded": @YES, @"hooksInstalled": @YES, @"time": [[NSDate date] description],
-           @"pid": @((int)[[NSProcessInfo processInfo] processIdentifier])}
-          writeToFile:@"/var/tmp/vedette-hook-canary.plist" atomically:YES];
+        // === Install hooks (may fail if class not found) ===
+        @try {
+            %init();
+            [@{@"initOK": @YES, @"time": [[NSDate date] description]}
+              writeToFile:@"/var/tmp/vedette-init-ok.plist" atomically:YES];
+        } @catch (NSException *e) {
+            [@{@"initFailed": @YES, @"reason": e.reason ?: @"unknown", @"name": e.name ?: @"?"}
+              writeToFile:@"/var/tmp/vedette-init-failed.plist" atomically:YES];
+        }
 
         // Initial prefs load + apply monitoring to already-running processes
         reloadPrefs();
