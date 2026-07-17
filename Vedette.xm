@@ -10,6 +10,7 @@
 
 #include <notify.h>
 #include <objc/runtime.h>
+#include <objc/message.h>
 
 #pragma mark - RunningBoard private headers
 // Choicy (opa334) reference: RBProcessManager.executeLaunchRequest:withError:
@@ -227,11 +228,144 @@ static void restoreAllMonitors(){
     });
 }
 
+#pragma mark - Runtime introspection for Plan C diagnostic
+// Dump class name, properties, and key methods of an object to a plist.
+// Only runs for the first N launches to avoid disk spam.
+
+static NSUInteger dumpCount = 0;
+#define VDT_MAX_DUMPS 5
+
+static NSString *VDTDumpPath(void){
+    static NSString *path;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        path = jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.rbdump.plist");
+    });
+    return path;
+}
+
+static NSArray *introspectProperties(Class cls){
+    NSMutableArray *props = [NSMutableArray array];
+    while (cls && cls != [NSObject class]) {
+        unsigned int count = 0;
+        objc_property_t *propList = class_copyPropertyList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            const char *name = property_getName(propList[i]);
+            const char *attrs = property_getAttributes(propList[i]);
+            [props addObject:@{
+                @"name": [NSString stringWithUTF8String:name],
+                @"attributes": attrs ? [NSString stringWithUTF8String:attrs] : @"?",
+                @"class": NSStringFromClass(cls)
+            }];
+        }
+        if (propList) free(propList);
+        cls = class_getSuperclass(cls);
+    }
+    return props;
+}
+
+static NSArray *introspectMethods(Class cls, NSArray *selNames){
+    NSMutableArray *results = [NSMutableArray array];
+    for (NSString *selName in selNames) {
+        SEL sel = NSSelectorFromString(selName);
+        BOOL responds = [cls instancesRespondToSelector:sel];
+        [results addObject:@{@"selector": selName, @"responds": @(responds)}];
+    }
+    return results;
+}
+
+static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundleID, NSString *daemonName){
+    if (dumpCount >= VDT_MAX_DUMPS) return;
+    dumpCount++;
+
+    NSMutableDictionary *dump = [NSMutableDictionary dictionary];
+    dump[@"dumpIndex"] = @(dumpCount);
+    dump[@"timestamp"] = [[NSDate date] description];
+    dump[@"bundleID"] = bundleID ?: @"(nil)";
+    dump[@"daemonName"] = daemonName ?: @"(nil)";
+
+    // --- result object (return value of executeLaunchRequest) ---
+    if (result) {
+        NSMutableDictionary *resultInfo = [NSMutableDictionary dictionary];
+        resultInfo[@"className"] = NSStringFromClass([result class]);
+        resultInfo[@"description"] = [result description] ?: @"(nil)";
+        resultInfo[@"properties"] = introspectProperties([result class]);
+
+        // Check pid-related selectors
+        NSArray *pidSelectors = @[@"pid", @"processIdentifier", @"processID",
+                                  @"process", @"identity", @"bundleIdentifier",
+                                  @"executablePath", @"token", @"auditToken"];
+        resultInfo[@"methodProbe"] = introspectMethods([result class], pidSelectors);
+
+        // Try to read pid if available
+        if ([result respondsToSelector:@selector(pid)]) {
+            @try {
+                NSNumber *pidVal = [NSNumber numberWithInt:((int (*)(id, SEL))objc_msgSend)(result, @selector(pid))];
+                resultInfo[@"pidValue"] = pidVal;
+            } @catch (NSException *e) {
+                resultInfo[@"pidError"] = e.reason ?: @"unknown";
+            }
+        }
+        if ([result respondsToSelector:@selector(processIdentifier)]) {
+            @try {
+                NSNumber *pidVal = [NSNumber numberWithInt:((int (*)(id, SEL))objc_msgSend)(result, @selector(processIdentifier))];
+                resultInfo[@"processIdentifierValue"] = pidVal;
+            } @catch (NSException *e) {
+                resultInfo[@"processIdentifierError"] = e.reason ?: @"unknown";
+            }
+        }
+        // Try to get nested process object
+        if ([result respondsToSelector:@selector(process)]) {
+            @try {
+                id proc = ((id (*)(id, SEL))objc_msgSend)(result, @selector(process));
+                if (proc) {
+                    NSMutableDictionary *procInfo = [NSMutableDictionary dictionary];
+                    procInfo[@"className"] = NSStringFromClass([proc class]);
+                    procInfo[@"description"] = [proc description] ?: @"(nil)";
+                    procInfo[@"properties"] = introspectProperties([proc class]);
+                    procInfo[@"methodProbe"] = introspectMethods([proc class], pidSelectors);
+                    if ([proc respondsToSelector:@selector(pid)]) {
+                        @try {
+                            procInfo[@"pidValue"] = [NSNumber numberWithInt:((int (*)(id, SEL))objc_msgSend)(proc, @selector(pid))];
+                        } @catch (NSException *e) {
+                            procInfo[@"pidError"] = e.reason ?: @"unknown";
+                        }
+                    }
+                    resultInfo[@"nestedProcess"] = procInfo;
+                }
+            } @catch (NSException *e) {
+                resultInfo[@"processAccessError"] = e.reason ?: @"unknown";
+            }
+        }
+
+        dump[@"result"] = resultInfo;
+    }
+
+    // --- launchRequest.context ---
+    if (request.context) {
+        NSMutableDictionary *ctxInfo = [NSMutableDictionary dictionary];
+        ctxInfo[@"className"] = NSStringFromClass([request.context class]);
+        ctxInfo[@"properties"] = introspectProperties([request.context class]);
+        dump[@"launchContext"] = ctxInfo;
+    }
+
+    // --- launchRequest itself ---
+    if (request) {
+        NSMutableDictionary *reqInfo = [NSMutableDictionary dictionary];
+        reqInfo[@"className"] = NSStringFromClass([request class]);
+        reqInfo[@"properties"] = introspectProperties([request class]);
+        dump[@"launchRequest"] = reqInfo;
+    }
+
+    // Write to plist (append to array)
+    NSMutableArray *allDumps = [NSMutableArray array];
+    NSArray *existing = [NSArray arrayWithContentsOfFile:VDTDumpPath()];
+    if (existing) [allDumps addObjectsFromArray:existing];
+    [allDumps addObject:dump];
+    [allDumps writeToFile:VDTDumpPath() atomically:YES];
+}
+
 #pragma mark - RBProcessManager hook (Choicy-style event-driven process detection)
-// Hook the process launch path inside runningboardd.
-// Every app/daemon launch goes through RBProcessManager.executeLaunchRequest:withError:.
-// After %orig succeeds, we do a single targeted PID lookup for that specific
-// bundleIdentifier instead of polling all PIDs every 10 seconds.
 
 %hook RBProcessManager
 
@@ -261,14 +395,17 @@ static void restoreAllMonitors(){
         }
     }
 
+    // Plan C: diagnostic dump for first N launches
+    if (dumpCount < VDT_MAX_DUMPS) {
+        dumpRBObjects(result, launchRequest, bundleID, daemonName);
+    }
+
     // Fast path: skip immediately if this process is not in the configured list.
-    // isIdentifierConfigured() is O(1) set lookup — no syscalls, no PID scan.
     BOOL appMatch = isIdentifierConfigured(bundleID, YES);
     BOOL daemonMatch = (daemonName && ![daemonName isEqualToString:@"runningboardd"]) 
                        ? isIdentifierConfigured(daemonName, NO) : NO;
 
     if (appMatch || daemonMatch) {
-        // Small delay lets the kernel finish process setup so PID is findable
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), vedette_serial_queue(), ^{
             if (appMatch) {
                 applyPolicyForIdentifier(bundleID, YES);
