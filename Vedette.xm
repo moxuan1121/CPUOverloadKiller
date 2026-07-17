@@ -44,6 +44,47 @@ static dispatch_queue_t vedette_serial_queue(){
 
 #pragma mark runningboardd
 
+// Cached set of configured identifiers for fast O(1) lookup in the hook path.
+// Updated whenever prefs are reloaded. Protected by vedette_serial_queue.
+static NSSet *configuredAppBundleIDs = nil;
+static NSSet *configuredDaemonNames = nil;
+
+static void rebuildConfiguredIdentifiers(NSDictionary *prefs){
+    NSMutableSet *apps = [NSMutableSet set];
+    NSMutableSet *daemons = [NSMutableSet set];
+
+    id enabledVal = valueForKeyWithPrefs(@"enabled", prefs);
+    BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
+    if (!enabled) {
+        configuredAppBundleIDs = [NSSet set];
+        configuredDaemonNames = [NSSet set];
+        return;
+    }
+
+    for (NSDictionary *cfg in prefs[@"appConfigs"]) {
+        NSString *bid = cfg[@"bundleIdentifier"];
+        if (bid && [valueForProcessConfigKeyWithPrefs(bid, @"enabled", @NO, VDTConfigTypeApp, prefs) boolValue]) {
+            [apps addObject:bid];
+        }
+    }
+    for (NSDictionary *cfg in prefs[@"daemonConfigs"]) {
+        NSString *dn = cfg[@"daemonName"];
+        if (dn && [valueForProcessConfigKeyWithPrefs(dn, @"enabled", @NO, VDTConfigTypeDaemon, prefs) boolValue]) {
+            [daemons addObject:dn];
+        }
+    }
+    configuredAppBundleIDs = [apps copy];
+    configuredDaemonNames = [daemons copy];
+}
+
+// Quick check — called on the hook path BEFORE dispatching any work.
+// Must be very cheap: no syscalls, no PID lookup, just set membership test.
+static BOOL isIdentifierConfigured(NSString *identifier, BOOL isApp){
+    if (!identifier) return NO;
+    return isApp ? [configuredAppBundleIDs containsObject:identifier]
+                 : [configuredDaemonNames containsObject:identifier];
+}
+
 // Core prefs reload logic. Must be called on vedette_serial_queue.
 static void reloadPrefsSync(){
 
@@ -117,47 +158,6 @@ static void reloadPrefs(){
     dispatch_async(vedette_serial_queue(), ^{
         reloadPrefsSync();
     });
-}
-
-// Cached set of configured identifiers for fast O(1) lookup in the hook path.
-// Updated whenever prefs are reloaded. Protected by vedette_serial_queue.
-static NSSet *configuredAppBundleIDs = nil;
-static NSSet *configuredDaemonNames = nil;
-
-static void rebuildConfiguredIdentifiers(NSDictionary *prefs){
-    NSMutableSet *apps = [NSMutableSet set];
-    NSMutableSet *daemons = [NSMutableSet set];
-
-    id enabledVal = valueForKeyWithPrefs(@"enabled", prefs);
-    BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
-    if (!enabled) {
-        configuredAppBundleIDs = [NSSet set];
-        configuredDaemonNames = [NSSet set];
-        return;
-    }
-
-    for (NSDictionary *cfg in prefs[@"appConfigs"]) {
-        NSString *bid = cfg[@"bundleIdentifier"];
-        if (bid && [valueForProcessConfigKeyWithPrefs(bid, @"enabled", @NO, VDTConfigTypeApp, prefs) boolValue]) {
-            [apps addObject:bid];
-        }
-    }
-    for (NSDictionary *cfg in prefs[@"daemonConfigs"]) {
-        NSString *dn = cfg[@"daemonName"];
-        if (dn && [valueForProcessConfigKeyWithPrefs(dn, @"enabled", @NO, VDTConfigTypeDaemon, prefs) boolValue]) {
-            [daemons addObject:dn];
-        }
-    }
-    configuredAppBundleIDs = [apps copy];
-    configuredDaemonNames = [daemons copy];
-}
-
-// Quick check — called on the hook path BEFORE dispatching any work.
-// Must be very cheap: no syscalls, no PID lookup, just set membership test.
-static BOOL isIdentifierConfigured(NSString *identifier, BOOL isApp){
-    if (!identifier) return NO;
-    return isApp ? [configuredAppBundleIDs containsObject:identifier]
-                 : [configuredDaemonNames containsObject:identifier];
 }
 
 // Apply monitoring/throttling to a single process identified by bundleID or daemon name.
