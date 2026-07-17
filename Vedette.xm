@@ -239,9 +239,8 @@ static NSString *VDTDumpPath(void){
     static NSString *path;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        // Use /var/tmp which is always writable by root (runningboardd runs as root).
-        // jbroot paths may not resolve or may lack write permissions.
-        path = @"/var/tmp/com.udevs.vedette.rbdump.plist";
+        // Use same dir as working Vedette prefs (jbroot preferences)
+        path = jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.rbdump.plist");
     });
     return path;
 }
@@ -382,14 +381,14 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
     [allDumps addObject:dump];
     BOOL wrote = [allDumps writeToFile:VDTDumpPath() atomically:YES];
     if (!wrote) {
-        // Fallback: try /tmp
-        [allDumps writeToFile:@"/tmp/vedette-rbdump.plist" atomically:YES];
+        // Fallback: try /var/root
+        [allDumps writeToFile:@"/var/root/vedette-rbdump.plist" atomically:YES];
     }
 
     } @catch (NSException *e) {
         // Last resort: write crash info
         NSDictionary *crashDump = @{@"crash": e.reason ?: @"unknown", @"name": e.name ?: @"?"};
-        [@[crashDump] writeToFile:@"/tmp/vedette-rbdump-crash.plist" atomically:YES];
+        [@[crashDump] writeToFile:@"/var/root/vedette-rbdump-crash.plist" atomically:YES];
     }
 }
 
@@ -456,26 +455,28 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
 %ctor{
     @autoreleasepool {
         // === FIRST: canary to prove dylib loaded ===
-        // This runs BEFORE anything else, including %init
+        // Use jbroot preferences path (same as working Vedette prefs)
         NSString *procName = [[[NSProcessInfo processInfo] arguments] firstObject];
-        [@{@"loaded": @YES,
+        NSDictionary *canary = @{@"loaded": @YES,
            @"time": [[NSDate date] description],
            @"pid": @((int)[[NSProcessInfo processInfo] processIdentifier]),
            @"process": procName ?: @"unknown",
-           @"processName": [[NSProcessInfo processInfo] processName] ?: @"unknown"}
-          writeToFile:@"/var/tmp/vedette-loaded.plist" atomically:YES];
-        // Also try /tmp in case /var/tmp is somehow restricted
-        [@{@"loaded": @YES, @"time": [[NSDate date] description]}
-          writeToFile:@"/tmp/vedette-loaded.plist" atomically:YES];
+           @"processName": [[NSProcessInfo processInfo] processName] ?: @"unknown"};
+        // Write to same dir as working Vedette prefs
+        [canary writeToFile:jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.canary.plist") atomically:YES];
+        [canary writeToFile:@"/var/root/vedette-canary.plist" atomically:YES];
 
         // === Install hooks (may fail if class not found) ===
         @try {
             %init();
             [@{@"initOK": @YES, @"time": [[NSDate date] description]}
-              writeToFile:@"/var/tmp/vedette-init-ok.plist" atomically:YES];
+              writeToFile:jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.initok.plist") atomically:YES];
+            [@{@"initOK": @YES, @"time": [[NSDate date] description]}
+              writeToFile:@"/var/root/vedette-initok.plist" atomically:YES];
         } @catch (NSException *e) {
-            [@{@"initFailed": @YES, @"reason": e.reason ?: @"unknown", @"name": e.name ?: @"?"}
-              writeToFile:@"/var/tmp/vedette-init-failed.plist" atomically:YES];
+            NSDictionary *fail = @{@"initFailed": @YES, @"reason": e.reason ?: @"unknown", @"name": e.name ?: @"?"};
+            [fail writeToFile:jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.initfail.plist") atomically:YES];
+            [fail writeToFile:@"/var/root/vedette-initfail.plist" atomically:YES];
         }
 
         // Initial prefs load + apply monitoring to already-running processes
