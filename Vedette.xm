@@ -239,7 +239,9 @@ static NSString *VDTDumpPath(void){
     static NSString *path;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        path = jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.rbdump.plist");
+        // Use /var/tmp which is always writable by root (runningboardd runs as root).
+        // jbroot paths may not resolve or may lack write permissions.
+        path = @"/var/tmp/com.udevs.vedette.rbdump.plist";
     });
     return path;
 }
@@ -278,17 +280,27 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
     if (dumpCount >= VDT_MAX_DUMPS) return;
     dumpCount++;
 
+    @try {
+
     NSMutableDictionary *dump = [NSMutableDictionary dictionary];
     dump[@"dumpIndex"] = @(dumpCount);
     dump[@"timestamp"] = [[NSDate date] description];
     dump[@"bundleID"] = bundleID ?: @"(nil)";
     dump[@"daemonName"] = daemonName ?: @"(nil)";
+    dump[@"dumpPath"] = VDTDumpPath(); // record for verification
 
     // --- result object (return value of executeLaunchRequest) ---
     if (result) {
         NSMutableDictionary *resultInfo = [NSMutableDictionary dictionary];
         resultInfo[@"className"] = NSStringFromClass([result class]);
-        resultInfo[@"description"] = [result description] ?: @"(nil)";
+        // Use safe description: truncate and sanitize for plist
+        @try {
+            NSString *desc = [result description];
+            if (desc.length > 500) desc = [desc substringToIndex:500];
+            resultInfo[@"description"] = desc ?: @"(nil)";
+        } @catch (NSException *e) {
+            resultInfo[@"description"] = @"(description threw exception)";
+        }
         resultInfo[@"properties"] = introspectProperties([result class]);
 
         // Check pid-related selectors
@@ -297,38 +309,42 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
                                   @"executablePath", @"token", @"auditToken"];
         resultInfo[@"methodProbe"] = introspectMethods([result class], pidSelectors);
 
-        // Try to read pid if available
-        if ([result respondsToSelector:@selector(pid)]) {
-            @try {
-                NSNumber *pidVal = [NSNumber numberWithInt:((int (*)(id, SEL))objc_msgSend)(result, @selector(pid))];
-                resultInfo[@"pidValue"] = pidVal;
-            } @catch (NSException *e) {
-                resultInfo[@"pidError"] = e.reason ?: @"unknown";
+        // Try to read pid if available — use valueForKey to avoid PAC issues with objc_msgSend
+        for (NSString *pidKey in @[@"pid", @"processIdentifier", @"processID"]) {
+            if ([result respondsToSelector:NSSelectorFromString(pidKey)]) {
+                @try {
+                    id val = [result valueForKey:pidKey];
+                    resultInfo[[NSString stringWithFormat:@"%@_value", pidKey]] = val ?: @"(nil)";
+                } @catch (NSException *e) {
+                    resultInfo[[NSString stringWithFormat:@"%@_error", pidKey]] = e.reason ?: @"unknown";
+                }
             }
         }
-        if ([result respondsToSelector:@selector(processIdentifier)]) {
-            @try {
-                NSNumber *pidVal = [NSNumber numberWithInt:((int (*)(id, SEL))objc_msgSend)(result, @selector(processIdentifier))];
-                resultInfo[@"processIdentifierValue"] = pidVal;
-            } @catch (NSException *e) {
-                resultInfo[@"processIdentifierError"] = e.reason ?: @"unknown";
-            }
-        }
+
         // Try to get nested process object
-        if ([result respondsToSelector:@selector(process)]) {
+        if ([result respondsToSelector:NSSelectorFromString(@"process")]) {
             @try {
-                id proc = ((id (*)(id, SEL))objc_msgSend)(result, @selector(process));
+                id proc = [result valueForKey:@"process"];
                 if (proc) {
                     NSMutableDictionary *procInfo = [NSMutableDictionary dictionary];
                     procInfo[@"className"] = NSStringFromClass([proc class]);
-                    procInfo[@"description"] = [proc description] ?: @"(nil)";
+                    @try {
+                        NSString *pdesc = [proc description];
+                        if (pdesc.length > 500) pdesc = [pdesc substringToIndex:500];
+                        procInfo[@"description"] = pdesc ?: @"(nil)";
+                    } @catch (NSException *e) {
+                        procInfo[@"description"] = @"(threw)";
+                    }
                     procInfo[@"properties"] = introspectProperties([proc class]);
                     procInfo[@"methodProbe"] = introspectMethods([proc class], pidSelectors);
-                    if ([proc respondsToSelector:@selector(pid)]) {
-                        @try {
-                            procInfo[@"pidValue"] = [NSNumber numberWithInt:((int (*)(id, SEL))objc_msgSend)(proc, @selector(pid))];
-                        } @catch (NSException *e) {
-                            procInfo[@"pidError"] = e.reason ?: @"unknown";
+                    for (NSString *pidKey in @[@"pid", @"processIdentifier", @"processID"]) {
+                        if ([proc respondsToSelector:NSSelectorFromString(pidKey)]) {
+                            @try {
+                                id val = [proc valueForKey:pidKey];
+                                procInfo[[NSString stringWithFormat:@"%@_value", pidKey]] = val ?: @"(nil)";
+                            } @catch (NSException *e) {
+                                procInfo[[NSString stringWithFormat:@"%@_error", pidKey]] = e.reason ?: @"unknown";
+                            }
                         }
                     }
                     resultInfo[@"nestedProcess"] = procInfo;
@@ -339,6 +355,8 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
         }
 
         dump[@"result"] = resultInfo;
+    } else {
+        dump[@"result"] = @"(nil)";
     }
 
     // --- launchRequest.context ---
@@ -362,7 +380,17 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
     NSArray *existing = [NSArray arrayWithContentsOfFile:VDTDumpPath()];
     if (existing) [allDumps addObjectsFromArray:existing];
     [allDumps addObject:dump];
-    [allDumps writeToFile:VDTDumpPath() atomically:YES];
+    BOOL wrote = [allDumps writeToFile:VDTDumpPath() atomically:YES];
+    if (!wrote) {
+        // Fallback: try /tmp
+        [allDumps writeToFile:@"/tmp/vedette-rbdump.plist" atomically:YES];
+    }
+
+    } @catch (NSException *e) {
+        // Last resort: write crash info
+        NSDictionary *crashDump = @{@"crash": e.reason ?: @"unknown", @"name": e.name ?: @"?"};
+        [@[crashDump] writeToFile:@"/tmp/vedette-rbdump-crash.plist" atomically:YES];
+    }
 }
 
 #pragma mark - RBProcessManager hook (Choicy-style event-driven process detection)
@@ -396,6 +424,10 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
     }
 
     // Plan C: diagnostic dump for first N launches
+    // Also write a canary file to confirm hook is firing at all
+    if (dumpCount == 0) {
+        [@{@"hookFired": @YES, @"time": [[NSDate date] description]} writeToFile:@"/var/tmp/vedette-hook-canary.plist" atomically:YES];
+    }
     if (dumpCount < VDT_MAX_DUMPS) {
         dumpRBObjects(result, launchRequest, bundleID, daemonName);
     }
