@@ -1,7 +1,7 @@
 {
 	Filter = {
-		Executables = (
-			"runningboardd",
+		Bundles = (
+			"com.apple.Security",
 		);
 	};
 }
