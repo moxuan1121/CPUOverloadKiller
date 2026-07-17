@@ -10,7 +10,6 @@
 
 #include <notify.h>
 #include <objc/runtime.h>
-#include <objc/message.h>
 
 #pragma mark - RunningBoard private headers
 // Choicy (opa334) reference: RBProcessManager.executeLaunchRequest:withError:
@@ -228,170 +227,6 @@ static void restoreAllMonitors(){
     });
 }
 
-#pragma mark - Runtime introspection for Plan C diagnostic
-// Dump class name, properties, and key methods of an object to a plist.
-// Only runs for the first N launches to avoid disk spam.
-
-static NSUInteger dumpCount = 0;
-#define VDT_MAX_DUMPS 5
-
-static NSString *VDTDumpPath(void){
-    static NSString *path;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        // Use same dir as working Vedette prefs (jbroot preferences)
-        path = jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.rbdump.plist");
-    });
-    return path;
-}
-
-static NSArray *introspectProperties(Class cls){
-    NSMutableArray *props = [NSMutableArray array];
-    while (cls && cls != [NSObject class]) {
-        unsigned int count = 0;
-        objc_property_t *propList = class_copyPropertyList(cls, &count);
-        for (unsigned int i = 0; i < count; i++) {
-            const char *name = property_getName(propList[i]);
-            const char *attrs = property_getAttributes(propList[i]);
-            [props addObject:@{
-                @"name": [NSString stringWithUTF8String:name],
-                @"attributes": attrs ? [NSString stringWithUTF8String:attrs] : @"?",
-                @"class": NSStringFromClass(cls)
-            }];
-        }
-        if (propList) free(propList);
-        cls = class_getSuperclass(cls);
-    }
-    return props;
-}
-
-static NSArray *introspectMethods(Class cls, NSArray *selNames){
-    NSMutableArray *results = [NSMutableArray array];
-    for (NSString *selName in selNames) {
-        SEL sel = NSSelectorFromString(selName);
-        BOOL responds = [cls instancesRespondToSelector:sel];
-        [results addObject:@{@"selector": selName, @"responds": @(responds)}];
-    }
-    return results;
-}
-
-static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundleID, NSString *daemonName){
-    if (dumpCount >= VDT_MAX_DUMPS) return;
-    dumpCount++;
-
-    @try {
-
-    NSMutableDictionary *dump = [NSMutableDictionary dictionary];
-    dump[@"dumpIndex"] = @(dumpCount);
-    dump[@"timestamp"] = [[NSDate date] description];
-    dump[@"bundleID"] = bundleID ?: @"(nil)";
-    dump[@"daemonName"] = daemonName ?: @"(nil)";
-    dump[@"dumpPath"] = VDTDumpPath(); // record for verification
-
-    // --- result object (return value of executeLaunchRequest) ---
-    if (result) {
-        NSMutableDictionary *resultInfo = [NSMutableDictionary dictionary];
-        resultInfo[@"className"] = NSStringFromClass([result class]);
-        // Use safe description: truncate and sanitize for plist
-        @try {
-            NSString *desc = [result description];
-            if (desc.length > 500) desc = [desc substringToIndex:500];
-            resultInfo[@"description"] = desc ?: @"(nil)";
-        } @catch (NSException *e) {
-            resultInfo[@"description"] = @"(description threw exception)";
-        }
-        resultInfo[@"properties"] = introspectProperties([result class]);
-
-        // Check pid-related selectors
-        NSArray *pidSelectors = @[@"pid", @"processIdentifier", @"processID",
-                                  @"process", @"identity", @"bundleIdentifier",
-                                  @"executablePath", @"token", @"auditToken"];
-        resultInfo[@"methodProbe"] = introspectMethods([result class], pidSelectors);
-
-        // Try to read pid if available — use valueForKey to avoid PAC issues with objc_msgSend
-        for (NSString *pidKey in @[@"pid", @"processIdentifier", @"processID"]) {
-            if ([result respondsToSelector:NSSelectorFromString(pidKey)]) {
-                @try {
-                    id val = [result valueForKey:pidKey];
-                    resultInfo[[NSString stringWithFormat:@"%@_value", pidKey]] = val ?: @"(nil)";
-                } @catch (NSException *e) {
-                    resultInfo[[NSString stringWithFormat:@"%@_error", pidKey]] = e.reason ?: @"unknown";
-                }
-            }
-        }
-
-        // Try to get nested process object
-        if ([result respondsToSelector:NSSelectorFromString(@"process")]) {
-            @try {
-                id proc = [result valueForKey:@"process"];
-                if (proc) {
-                    NSMutableDictionary *procInfo = [NSMutableDictionary dictionary];
-                    procInfo[@"className"] = NSStringFromClass([proc class]);
-                    @try {
-                        NSString *pdesc = [proc description];
-                        if (pdesc.length > 500) pdesc = [pdesc substringToIndex:500];
-                        procInfo[@"description"] = pdesc ?: @"(nil)";
-                    } @catch (NSException *e) {
-                        procInfo[@"description"] = @"(threw)";
-                    }
-                    procInfo[@"properties"] = introspectProperties([proc class]);
-                    procInfo[@"methodProbe"] = introspectMethods([proc class], pidSelectors);
-                    for (NSString *pidKey in @[@"pid", @"processIdentifier", @"processID"]) {
-                        if ([proc respondsToSelector:NSSelectorFromString(pidKey)]) {
-                            @try {
-                                id val = [proc valueForKey:pidKey];
-                                procInfo[[NSString stringWithFormat:@"%@_value", pidKey]] = val ?: @"(nil)";
-                            } @catch (NSException *e) {
-                                procInfo[[NSString stringWithFormat:@"%@_error", pidKey]] = e.reason ?: @"unknown";
-                            }
-                        }
-                    }
-                    resultInfo[@"nestedProcess"] = procInfo;
-                }
-            } @catch (NSException *e) {
-                resultInfo[@"processAccessError"] = e.reason ?: @"unknown";
-            }
-        }
-
-        dump[@"result"] = resultInfo;
-    } else {
-        dump[@"result"] = @"(nil)";
-    }
-
-    // --- launchRequest.context ---
-    if (request.context) {
-        NSMutableDictionary *ctxInfo = [NSMutableDictionary dictionary];
-        ctxInfo[@"className"] = NSStringFromClass([request.context class]);
-        ctxInfo[@"properties"] = introspectProperties([request.context class]);
-        dump[@"launchContext"] = ctxInfo;
-    }
-
-    // --- launchRequest itself ---
-    if (request) {
-        NSMutableDictionary *reqInfo = [NSMutableDictionary dictionary];
-        reqInfo[@"className"] = NSStringFromClass([request class]);
-        reqInfo[@"properties"] = introspectProperties([request class]);
-        dump[@"launchRequest"] = reqInfo;
-    }
-
-    // Write to plist (append to array)
-    NSMutableArray *allDumps = [NSMutableArray array];
-    NSArray *existing = [NSArray arrayWithContentsOfFile:VDTDumpPath()];
-    if (existing) [allDumps addObjectsFromArray:existing];
-    [allDumps addObject:dump];
-    BOOL wrote = [allDumps writeToFile:VDTDumpPath() atomically:YES];
-    if (!wrote) {
-        // Fallback: try /var/root
-        [allDumps writeToFile:@"/var/root/vedette-rbdump.plist" atomically:YES];
-    }
-
-    } @catch (NSException *e) {
-        // Last resort: write crash info
-        NSDictionary *crashDump = @{@"crash": e.reason ?: @"unknown", @"name": e.name ?: @"?"};
-        [@[crashDump] writeToFile:@"/var/root/vedette-rbdump-crash.plist" atomically:YES];
-    }
-}
-
 #pragma mark - RBProcessManager hook (Choicy-style event-driven process detection)
 
 %hook RBProcessManager
@@ -422,15 +257,6 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
         }
     }
 
-    // Plan C: diagnostic dump for first N launches
-    // Also write a canary file to confirm hook is firing at all
-    if (dumpCount == 0) {
-        [@{@"hookFired": @YES, @"time": [[NSDate date] description]} writeToFile:@"/var/tmp/vedette-hook-canary.plist" atomically:YES];
-    }
-    if (dumpCount < VDT_MAX_DUMPS) {
-        dumpRBObjects(result, launchRequest, bundleID, daemonName);
-    }
-
     // Fast path: skip immediately if this process is not in the configured list.
     BOOL appMatch = isIdentifierConfigured(bundleID, YES);
     BOOL daemonMatch = (daemonName && ![daemonName isEqualToString:@"runningboardd"]) 
@@ -454,30 +280,8 @@ static void dumpRBObjects(id result, RBSLaunchRequest *request, NSString *bundle
 
 %ctor{
     @autoreleasepool {
-        // === FIRST: canary to prove dylib loaded ===
-        // Use jbroot preferences path (same as working Vedette prefs)
-        NSString *procName = [[[NSProcessInfo processInfo] arguments] firstObject];
-        NSDictionary *canary = @{@"loaded": @YES,
-           @"time": [[NSDate date] description],
-           @"pid": @((int)[[NSProcessInfo processInfo] processIdentifier]),
-           @"process": procName ?: @"unknown",
-           @"processName": [[NSProcessInfo processInfo] processName] ?: @"unknown"};
-        // Write to same dir as working Vedette prefs
-        [canary writeToFile:jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.canary.plist") atomically:YES];
-        [canary writeToFile:@"/var/root/vedette-canary.plist" atomically:YES];
-
-        // === Install hooks (may fail if class not found) ===
-        @try {
-            %init();
-            [@{@"initOK": @YES, @"time": [[NSDate date] description]}
-              writeToFile:jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.initok.plist") atomically:YES];
-            [@{@"initOK": @YES, @"time": [[NSDate date] description]}
-              writeToFile:@"/var/root/vedette-initok.plist" atomically:YES];
-        } @catch (NSException *e) {
-            NSDictionary *fail = @{@"initFailed": @YES, @"reason": e.reason ?: @"unknown", @"name": e.name ?: @"?"};
-            [fail writeToFile:jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.initfail.plist") atomically:YES];
-            [fail writeToFile:@"/var/root/vedette-initfail.plist" atomically:YES];
-        }
+        // Install RBProcessManager hook
+        %init();
 
         // Initial prefs load + apply monitoring to already-running processes
         reloadPrefs();
