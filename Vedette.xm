@@ -180,21 +180,17 @@ static void restoreAllMonitors(){
                         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)restoreAllMonitors, (CFStringRef)RESTORE_ALL_MONITORS_NN, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
                     }else{
                         // --- App/daemon path ---
-                        // If this process is in the user's config, self-report PID
-                        // via Darwin notification so runningboardd picks it up immediately.
-                        NSString *bundleIdentifier = isApplication ? [[NSBundle mainBundle] bundleIdentifier] : nil;
-                        if(isApplication && [bundleIdentifier isEqualToString:@"com.apple.Preferences"]){
+                        // Unconditionally self-report PID. Let runningboardd decide
+                        // whether this process is in the config. This avoids relying
+                        // on reading the prefs plist from the App process, which can
+                        // fail on roothide when jbroot() resolves to a different path
+                        // than what the settings UI wrote to.
+                        if(isApplication && [[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.apple.Preferences"]){
                             HBLogDebug(@"Yeah, just no.");
                             return;
                         }
-                        NSDictionary *weakPrefs = getPrefs();
-                        id enabledVal = valueForKeyWithPrefs(@"enabled", weakPrefs);
-                        BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
-                        BOOL processEnabled = [valueForProcessConfigKeyWithPrefs((isApplication ? bundleIdentifier : processName), @"enabled", @NO, (isApplication ? VDTConfigTypeApp : VDTConfigTypeDaemon), weakPrefs) boolValue];
-                        if (enabled && processEnabled){
-                            HBLogDebug(@"Notify new pid: %d", [procInfo processIdentifier]);
-                            notify_new_pid(NOTIFY_PID_NN, [procInfo processIdentifier]);
-                        }
+                        HBLogDebug(@"Notify new pid: %d", [procInfo processIdentifier]);
+                        notify_new_pid(NOTIFY_PID_NN, [procInfo processIdentifier]);
                     }
                     
                 }
