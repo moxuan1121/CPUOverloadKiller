@@ -6,8 +6,28 @@
 #import "Common.h"
 #import "VDTProcessManager.h"
 #import "VDTShared.h"
+#import "VDTProbe.h"
 
 #include <notify.h>
+#include <objc/runtime.h>
+
+#pragma mark - RunningBoard private headers
+// Choicy (opa334) reference: RBProcessManager.executeLaunchRequest:withError:
+// gives us the process launch event with bundleIdentifier from the launch context.
+
+@interface RBSProcessIdentity : NSObject
+@property (readonly, copy, nonatomic) NSString *executablePath;
+@property (readonly, copy, nonatomic) NSString *embeddedApplicationIdentifier;
+@end
+
+@interface RBSLaunchContext : NSObject
+@property (nonatomic, copy) NSString *bundleIdentifier;
+@property (nonatomic, copy) RBSProcessIdentity *identity;
+@end
+
+@interface RBSLaunchRequest : NSObject
+@property (nonatomic, readonly) RBSLaunchContext *context;
+@end
 
 #pragma mark - Serial queue for prefs/monitoring work
 // All prefs reload and process scanning work is serialized here to prevent
@@ -21,14 +41,6 @@ static dispatch_queue_t vedette_serial_queue(){
     });
     return q;
 }
-
-#pragma mark - Process discovery timer
-// Replaces the old cross-process notify_new_pid mechanism.
-// With the narrowed filter (Executables=runningboardd), other processes no longer
-// self-report via Darwin notifications. Instead, runningboardd periodically scans
-// for new PIDs matching the user's config and applies monitoring/throttling.
-
-static dispatch_source_t processDiscoveryTimer;
 
 #pragma mark runningboardd
 
@@ -106,6 +118,46 @@ static void reloadPrefs(){
     });
 }
 
+// Apply monitoring/throttling to a single process identified by bundleID or daemon name.
+// Called from the RBProcessManager hook when a new process launches.
+// Runs on vedette_serial_queue.
+static void applyPolicyForIdentifier(NSString *identifier, BOOL isApp){
+    NSDictionary *localPrefs = VDTGetPrefs();
+    if (!localPrefs) return;
+
+    id enabledVal = valueForKeyWithPrefs(@"enabled", localPrefs);
+    BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
+    if (!enabled) return;
+
+    VDTConfigType type = isApp ? VDTConfigTypeApp : VDTConfigTypeDaemon;
+    BOOL processEnabled = [valueForProcessConfigKeyWithPrefs(identifier, @"enabled", @NO, type, localPrefs) boolValue];
+    if (!processEnabled) return;
+
+    int percentage = [valueForProcessConfigKeyWithPrefs(identifier, @"percentage", @80, type, localPrefs) intValue];
+    int interval = [valueForProcessConfigKeyWithPrefs(identifier, @"interval", @120, type, localPrefs) intValue];
+    VDTViolationPolicy violationPolicy = (VDTViolationPolicy)[valueForProcessConfigKeyWithPrefs(identifier, @"violationPolicy", @(VDTViolationPolicyMonitorAndTerminate), type, localPrefs) unsignedLongValue];
+
+    if (violationPolicy == VDTViolationPolicyNone) return;
+
+    // Single-target PID lookup — much cheaper than full proc_listpids scan
+    NSArray *pids = pids_with_identifier_and_type(@[identifier], @[@(type)]);
+    if (pids.count == 0) return;
+
+    HBLogDebug(@"Vedette: hook-driven apply for %@ (pid %@, policy %lu, pct %d)",
+               identifier, pids[0], (unsigned long)violationPolicy, percentage);
+
+    switch (violationPolicy) {
+        case VDTViolationPolicyMonitorAndTerminate:
+            monitor_pids(pids, @[@(percentage)], @[@(interval)]);
+            break;
+        case VDTViolationPolicyThrottle:
+            throttle_pids(pids, @[@(percentage)]);
+            break;
+        default:
+            break;
+    }
+}
+
 static void restoreAllMonitors(){
     dispatch_async(vedette_serial_queue(), ^{
         //restore_all_monitors();
@@ -139,33 +191,69 @@ static void restoreAllMonitors(){
     });
 }
 
-static void startProcessDiscovery(){
-    processDiscoveryTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, vedette_serial_queue());
-    // Scan every 10 seconds with 3 second leeway for power efficiency.
-    // This catches newly launched processes that match the user's config.
-    dispatch_source_set_timer(processDiscoveryTimer,
-        dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC),
-        10 * NSEC_PER_SEC,
-        3 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(processDiscoveryTimer, ^{
-        reloadPrefsSync();
-    });
-    dispatch_resume(processDiscoveryTimer);
+#pragma mark - RBProcessManager hook (Choicy-style event-driven process detection)
+// Hook the process launch path inside runningboardd.
+// Every app/daemon launch goes through RBProcessManager.executeLaunchRequest:withError:.
+// After %orig succeeds, we do a single targeted PID lookup for that specific
+// bundleIdentifier instead of polling all PIDs every 10 seconds.
+
+%hook RBProcessManager
+
+- (id)executeLaunchRequest:(RBSLaunchRequest *)launchRequest withError:(NSError **)errorOut
+{
+    id result = %orig;
+    if (!result) return result; // launch failed, nothing to do
+
+    RBSLaunchContext *ctx = launchRequest.context;
+    NSString *bundleID = nil;
+    if ([ctx respondsToSelector:@selector(bundleIdentifier)]) {
+        bundleID = ctx.bundleIdentifier;
+    }
+    if (!bundleID && [ctx respondsToSelector:@selector(identity)]) {
+        bundleID = ctx.identity.embeddedApplicationIdentifier;
+    }
+
+    // Also try to extract daemon executable name from identity path
+    NSString *daemonName = nil;
+    if ([ctx respondsToSelector:@selector(identity)] && ctx.identity) {
+        NSString *execPath = nil;
+        if ([ctx.identity respondsToSelector:@selector(executablePath)]) {
+            execPath = ctx.identity.executablePath;
+        }
+        if (execPath) {
+            daemonName = execPath.lastPathComponent;
+        }
+    }
+
+    if (bundleID || daemonName) {
+        // Small delay lets the kernel finish process setup so PID is findable
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), vedette_serial_queue(), ^{
+            if (bundleID) {
+                applyPolicyForIdentifier(bundleID, YES);
+            }
+            if (daemonName && ![daemonName isEqualToString:@"runningboardd"]) {
+                applyPolicyForIdentifier(daemonName, NO);
+            }
+        });
+    }
+
+    return result;
 }
+
+%end
 
 %ctor{
     @autoreleasepool {
         // Filter.Executables = ("runningboardd") ensures this only loads in runningboardd.
-        
+
         // Initial prefs load + apply monitoring to already-running processes
         reloadPrefs();
-        
-        // Periodic PID scan to discover newly launched processes
-        startProcessDiscovery();
-        
+
+        // No more polling timer — process discovery is now event-driven
+        // via the RBProcessManager hook above.
+
         // React to prefs changes from the settings UI
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)reloadPrefs, (CFStringRef)PREFS_CHANGED_NN, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)restoreAllMonitors, (CFStringRef)RESTORE_ALL_MONITORS_NN, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
     }
-    
 }
