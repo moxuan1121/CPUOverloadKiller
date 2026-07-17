@@ -49,6 +49,7 @@ static void reloadPrefsSync(){
 
     NSDictionary *newPrefs = getPrefs();
     VDTSetPrefs(newPrefs);
+    rebuildConfiguredIdentifiers(newPrefs);
     
     id enabledVal = valueForKeyWithPrefs(@"enabled", newPrefs);
     BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
@@ -118,20 +119,55 @@ static void reloadPrefs(){
     });
 }
 
+// Cached set of configured identifiers for fast O(1) lookup in the hook path.
+// Updated whenever prefs are reloaded. Protected by vedette_serial_queue.
+static NSSet *configuredAppBundleIDs = nil;
+static NSSet *configuredDaemonNames = nil;
+
+static void rebuildConfiguredIdentifiers(NSDictionary *prefs){
+    NSMutableSet *apps = [NSMutableSet set];
+    NSMutableSet *daemons = [NSMutableSet set];
+
+    id enabledVal = valueForKeyWithPrefs(@"enabled", prefs);
+    BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
+    if (!enabled) {
+        configuredAppBundleIDs = [NSSet set];
+        configuredDaemonNames = [NSSet set];
+        return;
+    }
+
+    for (NSDictionary *cfg in prefs[@"appConfigs"]) {
+        NSString *bid = cfg[@"bundleIdentifier"];
+        if (bid && [valueForProcessConfigKeyWithPrefs(bid, @"enabled", @NO, VDTConfigTypeApp, prefs) boolValue]) {
+            [apps addObject:bid];
+        }
+    }
+    for (NSDictionary *cfg in prefs[@"daemonConfigs"]) {
+        NSString *dn = cfg[@"daemonName"];
+        if (dn && [valueForProcessConfigKeyWithPrefs(dn, @"enabled", @NO, VDTConfigTypeDaemon, prefs) boolValue]) {
+            [daemons addObject:dn];
+        }
+    }
+    configuredAppBundleIDs = [apps copy];
+    configuredDaemonNames = [daemons copy];
+}
+
+// Quick check — called on the hook path BEFORE dispatching any work.
+// Must be very cheap: no syscalls, no PID lookup, just set membership test.
+static BOOL isIdentifierConfigured(NSString *identifier, BOOL isApp){
+    if (!identifier) return NO;
+    return isApp ? [configuredAppBundleIDs containsObject:identifier]
+                 : [configuredDaemonNames containsObject:identifier];
+}
+
 // Apply monitoring/throttling to a single process identified by bundleID or daemon name.
 // Called from the RBProcessManager hook when a new process launches.
-// Runs on vedette_serial_queue.
+// Runs on vedette_serial_queue. Only called for configured identifiers.
 static void applyPolicyForIdentifier(NSString *identifier, BOOL isApp){
     NSDictionary *localPrefs = VDTGetPrefs();
     if (!localPrefs) return;
 
-    id enabledVal = valueForKeyWithPrefs(@"enabled", localPrefs);
-    BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
-    if (!enabled) return;
-
     VDTConfigType type = isApp ? VDTConfigTypeApp : VDTConfigTypeDaemon;
-    BOOL processEnabled = [valueForProcessConfigKeyWithPrefs(identifier, @"enabled", @NO, type, localPrefs) boolValue];
-    if (!processEnabled) return;
 
     int percentage = [valueForProcessConfigKeyWithPrefs(identifier, @"percentage", @80, type, localPrefs) intValue];
     int interval = [valueForProcessConfigKeyWithPrefs(identifier, @"interval", @120, type, localPrefs) intValue];
@@ -139,7 +175,7 @@ static void applyPolicyForIdentifier(NSString *identifier, BOOL isApp){
 
     if (violationPolicy == VDTViolationPolicyNone) return;
 
-    // Single-target PID lookup — much cheaper than full proc_listpids scan
+    // Single-target PID lookup — only runs for configured processes
     NSArray *pids = pids_with_identifier_and_type(@[identifier], @[@(type)]);
     if (pids.count == 0) return;
 
@@ -225,13 +261,19 @@ static void restoreAllMonitors(){
         }
     }
 
-    if (bundleID || daemonName) {
+    // Fast path: skip immediately if this process is not in the configured list.
+    // isIdentifierConfigured() is O(1) set lookup — no syscalls, no PID scan.
+    BOOL appMatch = isIdentifierConfigured(bundleID, YES);
+    BOOL daemonMatch = (daemonName && ![daemonName isEqualToString:@"runningboardd"]) 
+                       ? isIdentifierConfigured(daemonName, NO) : NO;
+
+    if (appMatch || daemonMatch) {
         // Small delay lets the kernel finish process setup so PID is findable
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), vedette_serial_queue(), ^{
-            if (bundleID) {
+            if (appMatch) {
                 applyPolicyForIdentifier(bundleID, YES);
             }
-            if (daemonName && ![daemonName isEqualToString:@"runningboardd"]) {
+            if (daemonMatch) {
                 applyPolicyForIdentifier(daemonName, NO);
             }
         });
