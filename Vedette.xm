@@ -9,25 +9,6 @@
 #import "VDTProbe.h"
 
 #include <notify.h>
-#include <objc/runtime.h>
-
-#pragma mark - RunningBoard private headers
-// Choicy (opa334) reference: RBProcessManager.executeLaunchRequest:withError:
-// gives us the process launch event with bundleIdentifier from the launch context.
-
-@interface RBSProcessIdentity : NSObject
-@property (readonly, copy, nonatomic) NSString *executablePath;
-@property (readonly, copy, nonatomic) NSString *embeddedApplicationIdentifier;
-@end
-
-@interface RBSLaunchContext : NSObject
-@property (nonatomic, copy) NSString *bundleIdentifier;
-@property (nonatomic, copy) RBSProcessIdentity *identity;
-@end
-
-@interface RBSLaunchRequest : NSObject
-@property (nonatomic, readonly) RBSLaunchContext *context;
-@end
 
 #pragma mark - Serial queue for prefs/monitoring work
 // All prefs reload and process scanning work is serialized here to prevent
@@ -227,67 +208,32 @@ static void restoreAllMonitors(){
     });
 }
 
-#pragma mark - RBProcessManager hook (Choicy-style event-driven process detection)
+#pragma mark - Periodic process discovery timer
+// Lightweight polling to catch newly launched configured processes.
+// Runs reloadPrefsSync every 60 seconds on the serial queue.
+// Much cheaper than the RBProcessManager hook approach which adds
+// overhead to every single process launch in the system.
 
-%hook RBProcessManager
+static dispatch_source_t processDiscoveryTimer = NULL;
 
-- (id)executeLaunchRequest:(RBSLaunchRequest *)launchRequest withError:(NSError **)errorOut
-{
-    id result = %orig;
-    if (!result) return result; // launch failed, nothing to do
-
-    RBSLaunchContext *ctx = launchRequest.context;
-    NSString *bundleID = nil;
-    if ([ctx respondsToSelector:@selector(bundleIdentifier)]) {
-        bundleID = ctx.bundleIdentifier;
-    }
-    if (!bundleID && [ctx respondsToSelector:@selector(identity)]) {
-        bundleID = ctx.identity.embeddedApplicationIdentifier;
-    }
-
-    // Also try to extract daemon executable name from identity path
-    NSString *daemonName = nil;
-    if ([ctx respondsToSelector:@selector(identity)] && ctx.identity) {
-        NSString *execPath = nil;
-        if ([ctx.identity respondsToSelector:@selector(executablePath)]) {
-            execPath = ctx.identity.executablePath;
-        }
-        if (execPath) {
-            daemonName = execPath.lastPathComponent;
-        }
-    }
-
-    // Fast path: skip immediately if this process is not in the configured list.
-    BOOL appMatch = isIdentifierConfigured(bundleID, YES);
-    BOOL daemonMatch = (daemonName && ![daemonName isEqualToString:@"runningboardd"]) 
-                       ? isIdentifierConfigured(daemonName, NO) : NO;
-
-    if (appMatch || daemonMatch) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), vedette_serial_queue(), ^{
-            if (appMatch) {
-                applyPolicyForIdentifier(bundleID, YES);
-            }
-            if (daemonMatch) {
-                applyPolicyForIdentifier(daemonName, NO);
-            }
-        });
-    }
-
-    return result;
+static void startProcessDiscoveryTimer(){
+    if (processDiscoveryTimer) return;
+    processDiscoveryTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, vedette_serial_queue());
+    // 60-second interval, 5-second leeway for power efficiency
+    dispatch_source_set_timer(processDiscoveryTimer, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), 60 * NSEC_PER_SEC, 5 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(processDiscoveryTimer, ^{
+        reloadPrefsSync();
+    });
+    dispatch_resume(processDiscoveryTimer);
 }
-
-%end
 
 %ctor{
     @autoreleasepool {
-        // Install RBProcessManager hook
-        %init();
-
         // Initial prefs load + apply monitoring to already-running processes
         reloadPrefs();
 
-        // No more polling timer — process discovery is now event-driven
-        // via the RBProcessManager hook above.
+        // Start periodic discovery for newly launched processes
+        startProcessDiscoveryTimer();
 
         // React to prefs changes from the settings UI
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)reloadPrefs, (CFStringRef)PREFS_CHANGED_NN, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
