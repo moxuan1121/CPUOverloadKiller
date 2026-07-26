@@ -9,6 +9,7 @@ on:
       - roothide-stable-marker2
       - roothide-no-rb-probe1
       - roothide-stable-probe3
+      - fix/proc-identity-guard
     paths:
       - '.github/workflows/roothide-build.yml'
       - '**/*.h'
@@ -30,14 +31,21 @@ jobs:
       THEOS: ${{ github.workspace }}/theos
       THEOS_PACKAGE_SCHEME: roothide
       FINALPACKAGE: 1
-      PREFIX: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/
+      PREFIX: /Applications/Xcode_15.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+      - name: Select pinned Xcode 15.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+          test "$(xcodebuild -version | head -n 1)" = "Xcode 15.4"
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "17.5"
+          xcodebuild -version
+          xcrun clang --version
+          xcrun ld -version_details
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Install packaging tools
         run: |
@@ -88,11 +96,30 @@ jobs:
           cp -R /tmp/AltList/.theos/obj/AltList.framework "$THEOS/vendor/lib/iphone/roothide/"
           cp /tmp/AltList/*.h "$THEOS/vendor/include/AltList/"
 
+      - name: Run host regression tests
+        run: tests/run_process_identity_tests.sh
+
       - name: Build package
         run: |
+          set -o pipefail
           export PATH="/opt/homebrew/opt/make/libexec/gnubin:$THEOS/bin:$PATH"
+          test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
           make clean SDKVERSION=16.5
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide SDKVERSION=16.5
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide SDKVERSION=16.5 2>&1 | tee /tmp/vedette-build.log
+
+      - name: Verify roothide artifact
+        run: |
+          test -s /tmp/vedette-build.log
+          ! grep -qi 'incompatible arm64e' /tmp/vedette-build.log
+          deb="$(find packages -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$deb"
+          test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
+          rm -rf /tmp/vedette-package
+          dpkg-deb -x "$deb" /tmp/vedette-package
+          dylib="$(find /tmp/vedette-package -name 'Vedette.dylib' -print -quit)"
+          test -n "$dylib"
+          lipo -verify_arch arm64e "$dylib"
+          otool -l "$dylib" | grep -q 'LC_DYLD_INFO_ONLY'
 
       - name: Upload deb packages
         uses: actions/upload-artifact@v4

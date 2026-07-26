@@ -7,6 +7,7 @@
 #import "VDTShared.h"
 #import "VDTProbe.h"
 #import "PrivateHeaders.h"
+#import "VDTProcessIdentity.h"
 
 #include <os/lock.h>
 
@@ -31,21 +32,32 @@ NSDictionary *VDTGetPrefs(void){
 #pragma mark - Process helpers
 
 static LSApplicationProxy* appproxy_from_bundle_path(NSString *path){
-    // Use fileURLWithPath to handle jbroot paths with spaces/special chars
-    return [objc_getClass("LSApplicationProxy") applicationProxyForBundleURL:[NSURL fileURLWithPath:path]];
+    if (![path isKindOfClass:[NSString class]] || path.length == 0) return nil;
+
+    NSURL *bundleURL = [NSURL fileURLWithPath:path];
+    Class proxyClass = objc_getClass("LSApplicationProxy");
+    if (!bundleURL || ![proxyClass respondsToSelector:@selector(applicationProxyForBundleURL:)]) return nil;
+
+    return [proxyClass applicationProxyForBundleURL:bundleURL];
 }
 
 static LSApplicationProxy* appproxy_from_pid(pid_t pid){
     char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
-    proc_pidpath(pid, pathBuffer, sizeof(pathBuffer));
-    NSString *possibleBundlePath = [NSString stringWithUTF8String:pathBuffer].stringByDeletingLastPathComponent;
+    if (!VDTCopyProcessInfoString(pid, pathBuffer, sizeof(pathBuffer), proc_pidpath)) return nil;
+
+    NSString *executablePath = [NSString stringWithUTF8String:pathBuffer];
+    if (executablePath.length == 0) return nil;
+
+    NSString *possibleBundlePath = executablePath.stringByDeletingLastPathComponent;
     return appproxy_from_bundle_path(possibleBundlePath);
 }
 
 static NSString* name_from_pid(pid_t pid){
     char nameBuffer[256];
-    proc_name(pid, nameBuffer, sizeof(nameBuffer));
-    return [NSString stringWithUTF8String:nameBuffer];
+    if (!VDTCopyProcessInfoString(pid, nameBuffer, sizeof(nameBuffer), proc_name)) return nil;
+
+    NSString *name = [NSString stringWithUTF8String:nameBuffer];
+    return name.length > 0 ? name : nil;
 }
 
 /*
@@ -201,21 +213,32 @@ void throttle_pids(NSArray <NSNumber *> *pids, NSArray <NSNumber *> *percentages
 #pragma mark - New process handler
 
 void received_new_proc(pid_t pid){
+    if (pid <= 0) return;
+
     // Snapshot prefs for thread safety
     NSDictionary *localPrefs = VDTGetPrefs();
     
     int percentage = 80;
     int interval = 120;
+    NSString *daemonName = nil;
     
     LSApplicationProxy *appProxy = appproxy_from_pid(pid);
+    NSString *bundleIdentifier = appProxy.bundleIdentifier;
     VDTViolationPolicy violationPolicy = VDTViolationPolicyMonitorAndTerminate;
     
-    if (appProxy.bundleIdentifier){ //isApplication
-        percentage = [valueForProcessConfigKeyWithPrefs(appProxy.bundleIdentifier, @"percentage", @80, VDTConfigTypeApp, localPrefs) intValue];
-        interval = [valueForProcessConfigKeyWithPrefs(appProxy.bundleIdentifier, @"interval", @120, VDTConfigTypeApp, localPrefs) intValue];
-        violationPolicy = (VDTViolationPolicy)[valueForProcessConfigKeyWithPrefs(appProxy.bundleIdentifier, @"violationPolicy", @(VDTViolationPolicyMonitorAndTerminate), VDTConfigTypeApp, localPrefs) unsignedLongValue];
+    if (bundleIdentifier.length > 0){ //isApplication
+        percentage = [valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"percentage", @80, VDTConfigTypeApp, localPrefs) intValue];
+        interval = [valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"interval", @120, VDTConfigTypeApp, localPrefs) intValue];
+        violationPolicy = (VDTViolationPolicy)[valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"violationPolicy", @(VDTViolationPolicyMonitorAndTerminate), VDTConfigTypeApp, localPrefs) unsignedLongValue];
     }else{ //isDaemon
-        NSString *daemonName = name_from_pid(pid);
+        daemonName = name_from_pid(pid);
+        if (daemonName.length == 0) {
+            VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
+                @"pid": @(pid),
+                @"reason": @"processIdentityUnavailable"
+            });
+            return;
+        }
         percentage = [valueForProcessConfigKeyWithPrefs(daemonName, @"percentage", @80, VDTConfigTypeDaemon, localPrefs) intValue];
         interval = [valueForProcessConfigKeyWithPrefs(daemonName, @"interval", @120, VDTConfigTypeDaemon, localPrefs) intValue];
         violationPolicy = (VDTViolationPolicy)[valueForProcessConfigKeyWithPrefs(daemonName, @"violationPolicy", @(VDTViolationPolicyMonitorAndTerminate), VDTConfigTypeDaemon, localPrefs) unsignedLongValue];
@@ -224,8 +247,8 @@ void received_new_proc(pid_t pid){
     
     VDTProbeRecord(@"runningboardd.receivedNewProcResolved", @{
         @"pid": @(pid),
-        @"name": name_from_pid(pid) ?: @"",
-        @"bundleIdentifier": appProxy.bundleIdentifier ?: @"",
+        @"name": daemonName ?: name_from_pid(pid) ?: @"",
+        @"bundleIdentifier": bundleIdentifier ?: @"",
         @"percentage": @(percentage),
         @"interval": @(interval),
         @"violationPolicy": @(violationPolicy)
