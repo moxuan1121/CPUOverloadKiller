@@ -83,10 +83,26 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - [x] Production patch applied.
 - [x] Regression check green.
 - [x] Local arm64e compile smoke check passed (local package not deliverable: `incompatible arm64e ABI compiler` warnings).
-- [ ] 1.1.8 cloud build and artifact verification complete.
+- [x] 1.1.8 cloud build and artifact verification complete.
 - [ ] 1.1.8 device verification complete.
 
-## Cloud evidence
+## 1.1.8 cloud evidence
+
+- Successful run: `30190940314` at source commit `7e68d189abe55549e811b7e206b774c1218e290b`.
+- Package: `com.udevs.vedette_1.1.8_iphoneos-arm64e.deb`.
+- SHA256: `39753b7d44eb6d4857f810bc16298ea797c5edebead06bc3c3cf3fec100c606a`.
+- SHA512: `4b938d0472cc5bb2d68ab871843edd509e60245385d33de5cd86595fd554c98af68179121156fdeea9c1383305637fe4bf32fda1251ad954361284ab18bf64a3`.
+- Both host checks passed in CI; actual build output contains no incompatible arm64e warning.
+- `Vedette.dylib` and `VedettePrefs` both contain arm64 and arm64e slices.
+- Shipped `Vedette.dylib` retains `_VDTCopyProcessInfoString` and
+  `processIdentityUnavailable`; 1.1.7 markers `prefsUnavailable`, `globallyDisabled`, and
+  `processNotEnabled` are absent.
+- The shipped source blobs match the locally reviewed files; the incorrect gate test is
+  absent remotely.
+- `received_new_proc` matches the 1.1.6 implementation except for comments/whitespace, so
+  this is specifically 1.1.5/1.1.6 auto-monitor behavior plus the stale-PID crash guard.
+
+## 1.1.6 cloud evidence
 
 - Successful run: `30184288005` at source commit `131b9b63cdcd126820eb09d77f180fc1fdf68371`.
 - Toolchain: macOS 14 runner, Xcode 15.4 (15F31d), Apple clang 15.0.0, system iPhoneOS SDK 17.5; the project intentionally compiles against the pinned Theos iPhoneOS16.5 SDK.
