@@ -146,9 +146,14 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - [x] Identity mutants are killed: ignoring full executable name, unconditional prefix matching, authoritative mismatch fallthrough, and path-component off-by-one.
 - [x] Contract mutants are killed: missing config gate, hardcoded percentage, skipped identity revalidation, wrong PID byte count, and retained prior policy.
 - [x] Local arm64 + arm64e clean compile passes; local arm64e ABI warnings make this output non-deliverable.
-- [ ] Independent runtime-safety review complete.
-- [ ] Independent diff/CI review complete.
+- [x] Independent runtime-safety review complete: no P0/P1; all five safety invariants hold.
+- [x] Independent diff/CI review complete: no P0; host suites and workflow gates verified.
 - [x] Version bumped to 1.1.9.
-- [ ] Commit and push complete.
-- [ ] Pinned macOS/Xcode cloud build and artifact evidence complete.
+- [x] Commit and push complete: `fa6d4f9` on `fix/proc-identity-guard`.
+- [x] Pinned macOS/Xcode cloud build and artifact evidence complete:
+  - CI runs `30199072929` and `30199075033`, both green; artifact taken from `30199075033`.
+  - SHA256: `81eb9138df84b0a12fbcbe33be024d7cc7b1400844e69c2764c5d8112b72a9b1`
+  - `lipo -verify_arch arm64 arm64e`: pass (dylib + prefs)
+  - `LC_DYLD_CHAINED_FIXUPS`: present; `LC_DYLD_INFO_ONLY`: absent
+  - Cloud logs: no `incompatible arm64e` warnings
 - [ ] Device verification complete.
