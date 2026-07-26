@@ -100,7 +100,7 @@ jobs:
       - name: Run host regression tests
         run: |
           tests/run_process_identity_tests.sh
-          python3 tests/check_monitor_gates.py
+          python3 tests/check_auto_monitor_path.py
 
       - name: Build package
         run: |

@@ -38,28 +38,32 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 
 ## Release
 
-- Crash fix shipped as `1.1.6` on branch `fix/proc-identity-guard`.
-- Opt-in gate fix ships as `1.1.7` on the same branch.
+- `1.1.6`: crash fix on branch `fix/proc-identity-guard`.
+- `1.1.7`: withdrawn. The added prefs opt-in gates regressed roothide automatic monitoring;
+  manual reload still worked, but newly launched processes were not guarded.
+- `1.1.8`: restores the exact 1.1.5 automatic-launch semantics while retaining all 1.1.6
+  stale-PID/path crash guards.
 - `1.1.5` is already deployed on device, so no fix may reuse that version string.
 
-## Follow-up defect found during review (fixed in 1.1.7)
+## Corrected diagnosis: automatic launch path
 
-- Severity: higher user impact than the crash. Unconfigured processes could be killed.
-- Introduced by `f227e2e`, which made every process self-report its PID unconditionally
-  from `Vedette.xm` to work around roothide prefs-path resolution, but never restored the
-  opt-in decision on the runningboardd side.
-- `received_new_proc` had no `enabled` check at all (verified: zero `enabled` references in
-  the pre-fix `VDTProcessManager.mm`). The global and per-process gates existed only in
-  `reloadPrefsSync`, which is a different code path.
-- Consequence: any newly launched process fell through to the fallback 80% / 120s values and
-  reached `proc_set_cpumon_params_fatal`, a terminating CPU monitor, even with the tweak's
-  master switch off.
-- Fix: `received_new_proc` now resolves prefs (shared snapshot, falling back to a direct read
-  during runningboardd startup), then enforces global `enabled` and per-process `enabled`
-  before any CPU syscall. `processEnabled` defaults to `NO`, so unknown processes are never
-  touched. Each rejection is recorded with a distinct reason.
-- Guard order and early-return structure are locked by `tests/check_monitor_gates.py`, which
-  was confirmed red against the pre-fix source from git and green after the patch.
+- `f227e2e` intentionally made App processes self-report every PID without reading prefs,
+  because App-process prefs reads are unreliable on roothide. The runningboardd callback is
+  the automatic guard path; `reloadPrefsSync` is the manual/config-reload path.
+- The 1.1.7 review incorrectly treated the absence of `enabled` gates in
+  `received_new_proc` as a proven defect. That was a code-level risk hypothesis without a
+  device reproduction. Adding the gates made the automatic path depend on a successful
+  config match and reproduced the old 1.1.4 symptom.
+- Device evidence: on 1.1.7, newly launched processes were not guarded, while manual trigger
+  remained effective. This isolates the regression to the new-process callback, not the CPU
+  syscalls, process scanner, or stored limits.
+- 1.1.8 removes only the 1.1.7 prefs/global/per-process gates. It retains PID <= 0 rejection,
+  validated `proc_pidpath`/`proc_name`, empty-path checks, and identity-unavailable early exit.
+- `tests/check_auto_monitor_path.py` is red on 1.1.7 (`per-process opt-in gate blocks the
+  automatic launch path`) and green after the rollback. The incorrect
+  `tests/check_monitor_gates.py` has been deleted.
+- Do not redesign global/per-process launch semantics again without targeted on-device
+  telemetry proving both the config source and desired behavior.
 
 ## Reviewed and intentionally not changed
 
@@ -79,22 +83,8 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - [x] Production patch applied.
 - [x] Regression check green.
 - [x] Local arm64e compile smoke check passed (local package not deliverable: `incompatible arm64e ABI compiler` warnings).
-- [x] Cloud build and artifact verification complete.
-- [ ] Device verification complete.
-
-## Follow-up: missing opt-in gate (1.1.7)
-
-Found during post-fix review, not introduced by the 1.1.6 crash fix.
-
-- `f227e2e` made every process self-report its PID unconditionally from `Vedette.xm`, but never added the matching `enabled` check on the runningboardd side.
-- `received_new_proc` had zero `enabled` references, so any newly launched process fell through to the 80%/120s fallback and reached `proc_set_cpumon_params_fatal`, which kills on violation.
-- This applied even with the global toggle off, and to processes the user never configured.
-- Fix: deny-by-default gates in `received_new_proc`, ordered before any CPU syscall: prefs availability, global `enabled`, per-process `enabled`.
-- Startup race handled by falling back to a direct `getPrefs()` read when the snapshot is not yet populated, so PIDs arriving before the first `reloadPrefs` are not silently dropped.
-- `tests/check_monitor_gates.py` asserts gate presence, ordering before `monitor_pids`/`throttle_pids`, early return, `processEnabled` defaulting to `NO`, and one enabled read per identity branch.
-- Red/green confirmed: the check fails against pre-fix source from git (`missing required guard`), passes after the patch.
-- Ships as `1.1.7`, cloud run `30188554209` at commit `7a3c120f9b505ab873bb981468791f9baf6ba36b`.
-- Package SHA256 `7fed6ac79a0f366e0d172b4aad4e9c2443dfe1dabf55257e558c1588979e40bc`; arm64+arm64e; all four skip-reason strings present in the shipped binary; no real ABI warning in cloud logs.
+- [ ] 1.1.8 cloud build and artifact verification complete.
+- [ ] 1.1.8 device verification complete.
 
 ## Cloud evidence
 

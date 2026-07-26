@@ -215,31 +215,9 @@ void throttle_pids(NSArray <NSNumber *> *pids, NSArray <NSNumber *> *percentages
 void received_new_proc(pid_t pid){
     if (pid <= 0) return;
 
-    // Snapshot prefs for thread safety. The snapshot is published asynchronously
-    // at load time, so fall back to a direct read for PIDs that arrive before the
-    // first reload completes; otherwise those processes would never be monitored.
-    NSDictionary *localPrefs = VDTGetPrefs() ?: getPrefs();
-
-    // Processes self-report their PID unconditionally (see Vedette.xm), so this
-    // handler owns the entire opt-in decision. Without the gates below, any newly
-    // launched process would receive the fallback 80%/120s fatal CPU monitor.
-    if (!localPrefs){
-        VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
-            @"pid": @(pid),
-            @"reason": @"prefsUnavailable"
-        });
-        return;
-    }
-
-    id enabledVal = valueForKeyWithPrefs(@"enabled", localPrefs);
-    BOOL enabled = enabledVal ? [enabledVal boolValue] : YES;
-    if (!enabled){
-        VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
-            @"pid": @(pid),
-            @"reason": @"globallyDisabled"
-        });
-        return;
-    }
+    // Snapshot prefs for thread safety. New processes self-report their PID
+    // unconditionally because App-process prefs reads are unreliable on roothide.
+    NSDictionary *localPrefs = VDTGetPrefs();
 
     int percentage = 80;
     int interval = 120;
@@ -248,10 +226,8 @@ void received_new_proc(pid_t pid){
     LSApplicationProxy *appProxy = appproxy_from_pid(pid);
     NSString *bundleIdentifier = appProxy.bundleIdentifier;
     VDTViolationPolicy violationPolicy = VDTViolationPolicyMonitorAndTerminate;
-    BOOL processEnabled = NO;
     
     if (bundleIdentifier.length > 0){ //isApplication
-        processEnabled = [valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"enabled", @NO, VDTConfigTypeApp, localPrefs) boolValue];
         percentage = [valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"percentage", @80, VDTConfigTypeApp, localPrefs) intValue];
         interval = [valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"interval", @120, VDTConfigTypeApp, localPrefs) intValue];
         violationPolicy = (VDTViolationPolicy)[valueForProcessConfigKeyWithPrefs(bundleIdentifier, @"violationPolicy", @(VDTViolationPolicyMonitorAndTerminate), VDTConfigTypeApp, localPrefs) unsignedLongValue];
@@ -264,24 +240,12 @@ void received_new_proc(pid_t pid){
             });
             return;
         }
-        processEnabled = [valueForProcessConfigKeyWithPrefs(daemonName, @"enabled", @NO, VDTConfigTypeDaemon, localPrefs) boolValue];
         percentage = [valueForProcessConfigKeyWithPrefs(daemonName, @"percentage", @80, VDTConfigTypeDaemon, localPrefs) intValue];
         interval = [valueForProcessConfigKeyWithPrefs(daemonName, @"interval", @120, VDTConfigTypeDaemon, localPrefs) intValue];
         violationPolicy = (VDTViolationPolicy)[valueForProcessConfigKeyWithPrefs(daemonName, @"violationPolicy", @(VDTViolationPolicyMonitorAndTerminate), VDTConfigTypeDaemon, localPrefs) unsignedLongValue];
 
     }
 
-    // Not configured by the user: never touch this process.
-    if (!processEnabled){
-        VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
-            @"pid": @(pid),
-            @"name": daemonName ?: @"",
-            @"bundleIdentifier": bundleIdentifier ?: @"",
-            @"reason": @"processNotEnabled"
-        });
-        return;
-    }
-    
     VDTProbeRecord(@"runningboardd.receivedNewProcResolved", @{
         @"pid": @(pid),
         @"name": daemonName ?: name_from_pid(pid) ?: @"",
