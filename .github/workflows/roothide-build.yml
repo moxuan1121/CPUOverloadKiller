@@ -120,7 +120,7 @@ jobs:
           dylib="$(find /tmp/vedette-package -name 'Vedette.dylib' -print -quit)"
           test -n "$dylib"
           lipo "$dylib" -verify_arch arm64e
-          otool -l "$dylib" | grep -q 'LC_DYLD_INFO_ONLY'
+          otool -l "$dylib" | grep -E 'LC_DYLD_(INFO_ONLY|CHAINED_FIXUPS)'
 
       - name: Upload deb packages
         uses: actions/upload-artifact@v4
