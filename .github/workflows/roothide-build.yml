@@ -90,6 +90,8 @@ jobs:
         run: |
           export PATH="/opt/homebrew/opt/make/libexec/gnubin:$THEOS/bin:$PATH"
           git clone --depth 1 https://github.com/opa334/AltList.git /tmp/AltList
+          git -C /tmp/AltList checkout --detach 9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7
+          test "$(git -C /tmp/AltList rev-parse HEAD)" = "9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7"
           make -C /tmp/AltList clean THEOS_PACKAGE_SCHEME=rootless SDKVERSION=16.5
           make -C /tmp/AltList FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SDKVERSION=16.5
           mkdir -p "$THEOS/vendor/include/AltList" "$THEOS/vendor/lib" "$THEOS/vendor/lib/iphone/roothide"
@@ -120,9 +122,15 @@ jobs:
           rm -rf /tmp/vedette-package
           dpkg-deb -x "$deb" /tmp/vedette-package
           dylib="$(find /tmp/vedette-package -name 'Vedette.dylib' -print -quit)"
+          prefs_binary="$(find /tmp/vedette-package -path '*/VedettePrefs.bundle/VedettePrefs' -print -quit)"
           test -n "$dylib"
-          lipo "$dylib" -verify_arch arm64e
-          otool -l "$dylib" | grep -E 'LC_DYLD_(INFO_ONLY|CHAINED_FIXUPS)'
+          test -n "$prefs_binary"
+          for binary in "$dylib" "$prefs_binary"; do
+            lipo "$binary" -verify_arch arm64 arm64e
+            otool -l "$binary" > /tmp/vedette-load-commands.txt
+            grep -q 'LC_DYLD_CHAINED_FIXUPS' /tmp/vedette-load-commands.txt
+            ! grep -q 'LC_DYLD_INFO_ONLY' /tmp/vedette-load-commands.txt
+          done
 
       - name: Upload deb packages
         uses: actions/upload-artifact@v4

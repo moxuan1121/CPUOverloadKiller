@@ -1,2 +1,4 @@
 .theos/
 packages/
+__pycache__/
+*.pyc

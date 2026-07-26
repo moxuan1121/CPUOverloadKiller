@@ -26,7 +26,7 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - A failed `proc_pidpath()` can still reach `fileURLWithPath:`.
 - An unresolved PID can still reach config lookup or CPU monitor syscalls.
 - Valid process resolution is accidentally skipped.
-- Cloud build uses a floating Xcode/SDK, emits chained fixups unexpectedly, or logs an incompatible arm64e ABI warning.
+- Cloud build uses a floating Xcode/SDK, loses the device-validated chained-fixups load-command shape, or logs an incompatible arm64e ABI warning.
 
 ## Evidence plan
 
@@ -41,9 +41,11 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - `1.1.6`: crash fix on branch `fix/proc-identity-guard`.
 - `1.1.7`: withdrawn. The added prefs opt-in gates regressed roothide automatic monitoring;
   manual reload still worked, but newly launched processes were not guarded.
-- `1.1.8`: restores the exact 1.1.5 automatic-launch semantics while retaining all 1.1.6
-  stale-PID/path crash guards.
-- `1.1.5` is already deployed on device, so no fix may reuse that version string.
+- `1.1.8`: restored the 1.1.5 automatic-launch behavior while retaining the 1.1.6
+  stale-PID/path crash guards, but still applied fallback limits to unconfigured PIDs.
+- `1.1.9`: exact-config redesign. Unconfigured or invalid targets are skipped; each
+  configured target carries and applies only its own validated policy and parameters.
+- Released or cloud-built version strings are not reused.
 
 ## Corrected diagnosis: automatic launch path
 
@@ -69,8 +71,9 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 
 - `VDTProbeRecord` remains active in release builds and costs an extra `proc_name` call per
   monitored PID. Cosmetic overhead, not a correctness issue; out of scope for this fix.
-- `malloc(0)` when `proc_listpids` returns 0 in `pids_with_identifier_and_type` is safe here
-  because `free(NULL)` is defined and the loop body never executes.
+- The old `pids_with_identifier_and_type` allocation and parallel-array path is superseded.
+  The replacement treats both `proc_listpids` return values as byte counts and derives the
+  loop bound with `writtenBytes / sizeof(int)`.
 - The App branch now keys on `bundleIdentifier.length > 0` instead of a nil check, so an empty
   bundle identifier falls through to daemon-name matching. Intentional: an empty identifier
   can never match a stored app config.
@@ -115,3 +118,37 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - Actual build output contains no `incompatible arm64e ABI compiler` warning.
 - Mach-O uses `LC_DYLD_CHAINED_FIXUPS`, matching the validated, deployed 1.1.5 baseline.
 - Extracted plists and package control scripts pass syntax validation; remote source blobs match the locally reviewed files.
+
+## 2026-07-26 exact-config redesign (in progress)
+
+### Corrected product contract
+
+- Every App/daemon may still self-report its PID because App-process prefs reads are unreliable on roothide.
+- Self-reporting is not permission to control the process. `runningboardd` must resolve the PID against its own validated prefs snapshot first.
+- No matching config means no target and zero CPU-limit syscalls.
+- Matching but globally/per-process disabled or invalid parameters means no monitoring on launch. A prefs reload may restore limits previously applied by Vedette.
+- Matching and enabled means the target carries that exact config's percentage, interval and policy through to the syscall layer.
+
+### New root causes addressed
+
+- The preference bundle stores a daemon's full executable filename, while `proc_name` returns a possibly truncated `p_comm`; exact full-name matching therefore uses `proc_pidpath` plus its last path component.
+- If the full path is unavailable, `proc_name` is exact-match only. Prefix matching fails closed because two processes can share the truncated prefix.
+- The old parallel PID/percentage/interval/policy arrays allowed index drift. Targets now bind PID and config in one dictionary.
+- `proc_listpids` returns bytes, not PID count; scan bounds now divide returned bytes by `sizeof(int)`.
+- User-writable plist collections and scalars are type-checked. Missing fields retain UI defaults only for an explicitly enabled config; explicit empty/malformed/non-positive parameters disable enforcement.
+- A resolved target binds the executable path (or exact `proc_name` fallback) observed during lookup and revalidates it immediately before CPU syscalls, so an exited or reused PID fails closed.
+- Policy transitions retire the previous policy first: throttle clears any fatal monitor; terminate clears any throttle; disabled entries clear both on reload.
+
+### Verification status
+
+- [x] Host process-identity test passes.
+- [x] Automatic-monitor source contract passes.
+- [x] Identity mutants are killed: ignoring full executable name, unconditional prefix matching, authoritative mismatch fallthrough, and path-component off-by-one.
+- [x] Contract mutants are killed: missing config gate, hardcoded percentage, skipped identity revalidation, wrong PID byte count, and retained prior policy.
+- [x] Local arm64 + arm64e clean compile passes; local arm64e ABI warnings make this output non-deliverable.
+- [ ] Independent runtime-safety review complete.
+- [ ] Independent diff/CI review complete.
+- [x] Version bumped to 1.1.9.
+- [ ] Commit and push complete.
+- [ ] Pinned macOS/Xcode cloud build and artifact evidence complete.
+- [ ] Device verification complete.
