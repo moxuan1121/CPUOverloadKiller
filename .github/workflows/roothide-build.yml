@@ -98,7 +98,9 @@ jobs:
           cp /tmp/AltList/*.h "$THEOS/vendor/include/AltList/"
 
       - name: Run host regression tests
-        run: tests/run_process_identity_tests.sh
+        run: |
+          tests/run_process_identity_tests.sh
+          python3 tests/check_monitor_gates.py
 
       - name: Build package
         run: |

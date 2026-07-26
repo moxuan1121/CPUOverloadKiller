@@ -1,4 +1,4 @@
-# Vedette runningboardd crash fix
+# Vedette runningboardd crash fix + monitor opt-in gate
 
 ## Baseline
 
@@ -38,8 +38,38 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 
 ## Release
 
-- Fix ships as `1.1.6` on branch `fix/proc-identity-guard`.
-- `1.1.5` is already deployed on device, so the fix must not reuse that version string.
+- Crash fix shipped as `1.1.6` on branch `fix/proc-identity-guard`.
+- Opt-in gate fix ships as `1.1.7` on the same branch.
+- `1.1.5` is already deployed on device, so no fix may reuse that version string.
+
+## Follow-up defect found during review (fixed in 1.1.7)
+
+- Severity: higher user impact than the crash. Unconfigured processes could be killed.
+- Introduced by `f227e2e`, which made every process self-report its PID unconditionally
+  from `Vedette.xm` to work around roothide prefs-path resolution, but never restored the
+  opt-in decision on the runningboardd side.
+- `received_new_proc` had no `enabled` check at all (verified: zero `enabled` references in
+  the pre-fix `VDTProcessManager.mm`). The global and per-process gates existed only in
+  `reloadPrefsSync`, which is a different code path.
+- Consequence: any newly launched process fell through to the fallback 80% / 120s values and
+  reached `proc_set_cpumon_params_fatal`, a terminating CPU monitor, even with the tweak's
+  master switch off.
+- Fix: `received_new_proc` now resolves prefs (shared snapshot, falling back to a direct read
+  during runningboardd startup), then enforces global `enabled` and per-process `enabled`
+  before any CPU syscall. `processEnabled` defaults to `NO`, so unknown processes are never
+  touched. Each rejection is recorded with a distinct reason.
+- Guard order and early-return structure are locked by `tests/check_monitor_gates.py`, which
+  was confirmed red against the pre-fix source from git and green after the patch.
+
+## Reviewed and intentionally not changed
+
+- `VDTProbeRecord` remains active in release builds and costs an extra `proc_name` call per
+  monitored PID. Cosmetic overhead, not a correctness issue; out of scope for this fix.
+- `malloc(0)` when `proc_listpids` returns 0 in `pids_with_identifier_and_type` is safe here
+  because `free(NULL)` is defined and the loop body never executes.
+- The App branch now keys on `bundleIdentifier.length > 0` instead of a nil check, so an empty
+  bundle identifier falls through to daemon-name matching. Intentional: an empty identifier
+  can never match a stored app config.
 
 ## Status
 
