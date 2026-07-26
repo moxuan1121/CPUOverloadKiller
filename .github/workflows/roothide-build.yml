@@ -119,7 +119,7 @@ jobs:
           dpkg-deb -x "$deb" /tmp/vedette-package
           dylib="$(find /tmp/vedette-package -name 'Vedette.dylib' -print -quit)"
           test -n "$dylib"
-          lipo -verify_arch arm64e "$dylib"
+          lipo "$dylib" -verify_arch arm64e
           otool -l "$dylib" | grep -q 'LC_DYLD_INFO_ONLY'
 
       - name: Upload deb packages
