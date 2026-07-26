@@ -49,5 +49,19 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - [x] Production patch applied.
 - [x] Regression check green.
 - [x] Local arm64e compile smoke check passed (local package not deliverable: `incompatible arm64e ABI compiler` warnings).
-- [ ] Cloud build and artifact verification complete.
+- [x] Cloud build and artifact verification complete.
 - [ ] Device verification complete.
+
+## Cloud evidence
+
+- Successful run: `30184288005` at source commit `131b9b63cdcd126820eb09d77f180fc1fdf68371`.
+- Toolchain: macOS 14 runner, Xcode 15.4 (15F31d), Apple clang 15.0.0, system iPhoneOS SDK 17.5; the project intentionally compiles against the pinned Theos iPhoneOS16.5 SDK.
+- Host regression test passed in CI.
+- Package: `com.udevs.vedette_1.1.6_iphoneos-arm64e.deb`.
+- SHA256: `314e4fd870c4ebfc4c61eb7cb9d2800075f74c7f5e1bdfb7534bba6b0ce935ef`.
+- SHA512: `3aff039e74b8461b11197754108137cd8f42ba17a408c18f38aee9a9720afaa3007d9ce06f80820dffa490a6f3dbd77471bda6c45c399ba3054747ab1264494d`.
+- `Vedette.dylib` architectures: arm64 and arm64e; arm64e UUID `65D241A3-D14B-3A72-824A-FA8353D5CB41`.
+- `VedettePrefs` architectures: arm64 and arm64e.
+- Actual build output contains no `incompatible arm64e ABI compiler` warning.
+- Mach-O uses `LC_DYLD_CHAINED_FIXUPS`, matching the validated, deployed 1.1.5 baseline.
+- Extracted plists and package control scripts pass syntax validation; remote source blobs match the locally reviewed files.
