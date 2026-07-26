@@ -82,6 +82,20 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
 - [x] Cloud build and artifact verification complete.
 - [ ] Device verification complete.
 
+## Follow-up: missing opt-in gate (1.1.7)
+
+Found during post-fix review, not introduced by the 1.1.6 crash fix.
+
+- `f227e2e` made every process self-report its PID unconditionally from `Vedette.xm`, but never added the matching `enabled` check on the runningboardd side.
+- `received_new_proc` had zero `enabled` references, so any newly launched process fell through to the 80%/120s fallback and reached `proc_set_cpumon_params_fatal`, which kills on violation.
+- This applied even with the global toggle off, and to processes the user never configured.
+- Fix: deny-by-default gates in `received_new_proc`, ordered before any CPU syscall: prefs availability, global `enabled`, per-process `enabled`.
+- Startup race handled by falling back to a direct `getPrefs()` read when the snapshot is not yet populated, so PIDs arriving before the first `reloadPrefs` are not silently dropped.
+- `tests/check_monitor_gates.py` asserts gate presence, ordering before `monitor_pids`/`throttle_pids`, early return, `processEnabled` defaulting to `NO`, and one enabled read per identity branch.
+- Red/green confirmed: the check fails against pre-fix source from git (`missing required guard`), passes after the patch.
+- Ships as `1.1.7`, cloud run `30188554209` at commit `7a3c120f9b505ab873bb981468791f9baf6ba36b`.
+- Package SHA256 `7fed6ac79a0f366e0d172b4aad4e9c2443dfe1dabf55257e558c1588979e40bc`; arm64+arm64e; all four skip-reason strings present in the shipped binary; no real ABI warning in cloud logs.
+
 ## Cloud evidence
 
 - Successful run: `30184288005` at source commit `131b9b63cdcd126820eb09d77f180fc1fdf68371`.
