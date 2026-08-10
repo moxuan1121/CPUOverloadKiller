@@ -135,6 +135,21 @@ static void test_last_path_component(void) {
     assert(!VDTCopyLastPathComponent("/usr/libexec/trustd", tight, sizeof(tight)));
 }
 
+static void test_process_instance_tokens(void) {
+    VDTProcessInstanceToken first = {.seconds = 100, .microseconds = 200};
+    VDTProcessInstanceToken same = {.seconds = 100, .microseconds = 200};
+    VDTProcessInstanceToken reusedPid = {.seconds = 101, .microseconds = 200};
+    VDTProcessInstanceToken invalid = {0};
+    VDTProcessInstanceToken invalidMicroseconds = {.seconds = 100, .microseconds = 1000000};
+
+    assert(VDTProcessInstanceTokenIsValid(first));
+    assert(!VDTProcessInstanceTokenIsValid(invalid));
+    assert(!VDTProcessInstanceTokenIsValid(invalidMicroseconds));
+    assert(VDTProcessInstanceMatches(first, same));
+    assert(!VDTProcessInstanceMatches(first, reusedPid));
+    assert(!VDTProcessInstanceMatches(first, invalid));
+}
+
 static void test_daemon_name_matching(void) {
     // Matching rule under test:
     //   * If the full executable name is available, it is authoritative and must
@@ -176,6 +191,7 @@ static void test_daemon_name_matching(void) {
 int main(void) {
     test_copy_process_info_string();
     test_last_path_component();
+    test_process_instance_tokens();
     test_daemon_name_matching();
     printf("process identity guard tests passed\n");
     return 0;

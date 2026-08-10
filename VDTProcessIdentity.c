@@ -2,6 +2,19 @@
 
 #include <string.h>
 
+bool VDTProcessInstanceTokenIsValid(VDTProcessInstanceToken token) {
+    return (token.seconds != 0 || token.microseconds != 0) &&
+        token.microseconds < 1000000;
+}
+
+bool VDTProcessInstanceMatches(VDTProcessInstanceToken expected,
+                               VDTProcessInstanceToken current) {
+    return VDTProcessInstanceTokenIsValid(expected) &&
+        VDTProcessInstanceTokenIsValid(current) &&
+        expected.seconds == current.seconds &&
+        expected.microseconds == current.microseconds;
+}
+
 bool VDTCopyProcessInfoString(pid_t pid,
                               char *buffer,
                               uint32_t bufferSize,

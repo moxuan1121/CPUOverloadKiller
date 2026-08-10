@@ -29,6 +29,8 @@ extern NSString * const VDTTargetPidKey;
 extern NSString * const VDTTargetNameKey;
 extern NSString * const VDTTargetExecutablePathKey;
 extern NSString * const VDTTargetProcCommKey;
+extern NSString * const VDTTargetStartSecondsKey;
+extern NSString * const VDTTargetStartMicrosecondsKey;
 
 // Type-checked normalisation of the user-writable prefs plist. Entries without a
 // valid identifier are dropped; entries with malformed parameters are retained
@@ -45,11 +47,18 @@ NSArray<NSDictionary *>* vdt_resolve_targets(NSArray<NSDictionary *> *configs);
 // not configured, which means "leave it alone".
 NSArray<NSDictionary *>* vdt_targets_for_pid(pid_t pid, NSArray<NSDictionary *> *configs);
 
-// Applies each target's own settings. A target with policy None or a zero
-// percentage/interval is restored to system defaults instead of limited.
-void vdt_apply_targets(NSArray<NSDictionary *> *targets);
+// Revalidates only the PID + start-time lifetime token. This distinguishes a
+// gone/reused PID from a temporarily unavailable path lookup during cleanup.
+BOOL vdt_target_instance_is_current(NSDictionary *target);
 
-void received_new_proc(pid_t pid);
+// Revalidates the PID, process start time, and bound path/name of a target.
+BOOL vdt_target_is_current(NSDictionary *target);
+
+// Applies one target and reports whether the complete transition succeeded.
+// A target with policy None or a zero percentage/interval is restored to system
+// defaults instead of limited.
+BOOL vdt_apply_target(NSDictionary *target);
+void vdt_apply_targets(NSArray<NSDictionary *> *targets);
 
 #ifdef __cplusplus
 }

@@ -22,6 +22,7 @@ on:
       - 'control'
       - 'layout/**'
       - 'vedetteprefs/**'
+      - 'tests/**'
 
 jobs:
   package:
@@ -36,14 +37,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Select pinned Xcode 15.4
         run: |
           sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
-          test "$(xcodebuild -version | head -n 1)" = "Xcode 15.4"
+          xcode_version="$(xcodebuild -version)"
+          test "${xcode_version%%$'\n'*}" = "Xcode 15.4"
           test "$(xcrun --sdk iphoneos --show-sdk-version)" = "17.5"
-          xcodebuild -version
+          printf '%s\n' "$xcode_version"
           xcrun clang --version
           xcrun ld -version_details
           xcrun --sdk iphoneos --show-sdk-version
@@ -55,14 +57,24 @@ jobs:
 
       - name: Install roothide Theos
         run: |
-          git clone --recursive https://github.com/roothide/theos.git "$THEOS"
-          git -C "$THEOS" checkout --detach 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
+          git init "$THEOS"
+          git -C "$THEOS" remote add origin https://github.com/roothide/theos.git
+          git -C "$THEOS" fetch --depth 1 origin 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
+          git -C "$THEOS" checkout --detach FETCH_HEAD
+          test "$(git -C "$THEOS" rev-parse HEAD)" = "88506b2c22e9e07dd4ed055f23c9e398a117a2c7"
+          git -C "$THEOS" submodule sync --recursive
+          git -C "$THEOS" submodule update --init --recursive
+          test -z "$(git -C "$THEOS" submodule status --recursive | grep '^[+-]' || true)"
 
       - name: Install iPhoneOS16.5 SDK
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/theos-sdks
-          git -C /tmp/theos-sdks checkout --detach 0222fd5413cf4b9af096f37b4621afa2688572f7
+          git init /tmp/theos-sdks
+          git -C /tmp/theos-sdks remote add origin https://github.com/theos/sdks.git
+          git -C /tmp/theos-sdks sparse-checkout init --cone
           git -C /tmp/theos-sdks sparse-checkout set iPhoneOS16.5.sdk
+          git -C /tmp/theos-sdks fetch --depth 1 origin 0222fd5413cf4b9af096f37b4621afa2688572f7
+          git -C /tmp/theos-sdks checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/theos-sdks rev-parse HEAD)" = "0222fd5413cf4b9af096f37b4621afa2688572f7"
           mkdir -p "$THEOS/sdks"
           cp -R /tmp/theos-sdks/iPhoneOS16.5.sdk "$THEOS/sdks/"
 
@@ -89,8 +101,10 @@ jobs:
       - name: Build AltList for Theos vendor
         run: |
           export PATH="/opt/homebrew/opt/make/libexec/gnubin:$THEOS/bin:$PATH"
-          git clone --depth 1 https://github.com/opa334/AltList.git /tmp/AltList
-          git -C /tmp/AltList checkout --detach 9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7
+          git init /tmp/AltList
+          git -C /tmp/AltList remote add origin https://github.com/opa334/AltList.git
+          git -C /tmp/AltList fetch --depth 1 origin 9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7
+          git -C /tmp/AltList checkout --detach FETCH_HEAD
           test "$(git -C /tmp/AltList rev-parse HEAD)" = "9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7"
           make -C /tmp/AltList clean THEOS_PACKAGE_SCHEME=rootless SDKVERSION=16.5
           make -C /tmp/AltList FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SDKVERSION=16.5
@@ -109,15 +123,20 @@ jobs:
           set -o pipefail
           export PATH="/opt/homebrew/opt/make/libexec/gnubin:$THEOS/bin:$PATH"
           test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
-          make clean SDKVERSION=16.5
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide SDKVERSION=16.5 2>&1 | tee /tmp/vedette-build.log
+          system_sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          test -d "$system_sdk"
+          make clean TARGET=iphone:clang:17.5:15.0 SYSROOT="$system_sdk"
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide TARGET=iphone:clang:17.5:15.0 SYSROOT="$system_sdk" 2>&1 | tee /tmp/vedette-build.log
 
       - name: Verify roothide artifact
         run: |
           test -s /tmp/vedette-build.log
           ! grep -qi 'incompatible arm64e' /tmp/vedette-build.log
-          deb="$(find packages -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$deb"
+          test "$(find packages -maxdepth 1 -name '*.deb' | wc -l | tr -d ' ')" = "1"
+          deb="packages/com.udevs.vedette_1.1.10_iphoneos-arm64e.deb"
+          test -s "$deb"
+          test "$(dpkg-deb -f "$deb" Package)" = "com.udevs.vedette"
+          test "$(dpkg-deb -f "$deb" Version)" = "1.1.10"
           test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
           rm -rf /tmp/vedette-package
           dpkg-deb -x "$deb" /tmp/vedette-package
@@ -125,15 +144,25 @@ jobs:
           prefs_binary="$(find /tmp/vedette-package -path '*/VedettePrefs.bundle/VedettePrefs' -print -quit)"
           test -n "$dylib"
           test -n "$prefs_binary"
+          test "${dylib#/tmp/vedette-package}" = "/Library/MobileSubstrate/DynamicLibraries/Vedette.dylib"
+          test "${prefs_binary#/tmp/vedette-package}" = "/Library/PreferenceBundles/VedettePrefs.bundle/VedettePrefs"
+          otool -D "$dylib" | grep -q '@loader_path/.jbroot/'
           for binary in "$dylib" "$prefs_binary"; do
             lipo "$binary" -verify_arch arm64 arm64e
             otool -l "$binary" > /tmp/vedette-load-commands.txt
             grep -q 'LC_DYLD_CHAINED_FIXUPS' /tmp/vedette-load-commands.txt
             ! grep -q 'LC_DYLD_INFO_ONLY' /tmp/vedette-load-commands.txt
+            grep -q 'LC_CODE_SIGNATURE' /tmp/vedette-load-commands.txt
+            test "$(awk '$1 == "minos" { print $2 }' /tmp/vedette-load-commands.txt | sort -u)" = "15.0"
+            test "$(awk '$1 == "sdk" { print $2 }' /tmp/vedette-load-commands.txt | sort -u)" = "17.5"
+          done
+          dpkg-deb -e "$deb" /tmp/vedette-control
+          for script in /tmp/vedette-control/preinst /tmp/vedette-control/postinst /tmp/vedette-control/prerm /tmp/vedette-control/postrm; do
+            test ! -f "$script" || bash -n "$script"
           done
 
       - name: Upload deb packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vedette-roothide-packages
           path: packages/*.deb

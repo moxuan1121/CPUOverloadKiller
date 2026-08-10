@@ -11,6 +11,15 @@ extern "C" {
 
 typedef int (*VDTProcessInfoReader)(int pid, void *buffer, uint32_t bufferSize);
 
+typedef struct {
+    uint64_t seconds;
+    uint64_t microseconds;
+} VDTProcessInstanceToken;
+
+bool VDTProcessInstanceTokenIsValid(VDTProcessInstanceToken token);
+bool VDTProcessInstanceMatches(VDTProcessInstanceToken expected,
+                               VDTProcessInstanceToken current);
+
 // Runs `reader` and only reports success when the buffer holds a non-empty,
 // NUL-terminated string. On failure the buffer is left as an empty string so
 // callers can never consume stale or partial data.

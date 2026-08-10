@@ -45,6 +45,8 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
   stale-PID/path crash guards, but still applied fallback limits to unconfigured PIDs.
 - `1.1.9`: exact-config redesign. Unconfigured or invalid targets are skipped; each
   configured target carries and applies only its own validated policy and parameters.
+- `1.1.10`: adversarial runtime hardening for malformed prefs, PID lifetime binding,
+  cleanup-failure gating, coalesced launch recovery, and deleted-config restoration.
 - Released or cloud-built version strings are not reused.
 
 ## Corrected diagnosis: automatic launch path
@@ -157,3 +159,65 @@ A process posts its PID and exits before runningboardd handles the Darwin notifi
   - `LC_DYLD_CHAINED_FIXUPS`: present; `LC_DYLD_INFO_ONLY`: absent
   - Cloud logs: no `incompatible arm64e` warnings
 - [ ] Device verification complete.
+
+## 2026-07-26 1.1.10 adversarial rereview (in progress)
+
+### Baseline and hypothesis
+
+- Review fixed point: `a02649c755090ac2698db23d6cc120b49d9c0ef0` on `fix/proc-identity-guard`.
+- Hypothesis: 1.1.9 closes the original unconfigured-process path, but malformed prefs,
+  same-executable PID reuse, coalesced launch notifications, and failed policy retirement can
+  still violate the opt-in contract or leave contradictory CPU policies active.
+- Existing untracked Chinese localization files remain user-owned and are excluded from this
+  change.
+
+### Success criteria and independent failure signals
+
+- A malformed plist at every collection/scalar boundary produces an empty/disabled config and
+  cannot raise inside `runningboardd`.
+- Every CPU-policy syscall is preceded by a fresh PID + start-time + path/name check. A changed
+  process instance fails closed even when the executable name is unchanged.
+- Applying a new throttle/fatal policy stops if retirement of the old policy fails. Restore
+  attempts every cleanup operation while the same process instance remains current.
+- A verified App process with no App config cannot fall through to a same-named daemon config.
+- Multiple launches in one Darwin-notification burst are found by immediate and trailing full
+  scans; PID state is only a fast path.
+- Deleting a config restores any still-current process instance that Vedette previously touched.
+- Independent failures are: any unconfigured target reaches a policy syscall, a reused PID passes
+  the start-time guard, a new policy follows a failed cleanup, a deleted target remains limited,
+  or a cloud artifact is not SDK 17.5 / arm64+arm64e / chained-fixups clean.
+
+### Changes
+
+- Strictly validate plist roots, sections, entries, booleans, integer-valued numbers, identifiers,
+  percentages, intervals, and policy values. Throttle requires its percentage; Fatal requires both
+  percentage and interval because only Fatal consumes the interval argument.
+- Bind targets to `PROC_PIDTBSDINFO` start seconds/microseconds and revalidate the token around
+  identity lookup and before every syscall.
+- Route transitions through `VDTApplyPolicyTransition`, whose syscalls are injectable in host
+  tests. Cleanup failure blocks the new policy; restore remains best-effort.
+- Treat an `.app` ancestor as an authoritative App identity boundary, including nested App-owned
+  executables, and prohibit daemon fallback.
+- Keep touched targets by process-instance key so prefs deletion or config removal can restore the
+  old policy. Stale instance records are discarded without touching a reused PID.
+- Keep the single PID notification state as acceleration only. A name-only post always remains,
+  and `runningboardd` performs immediate plus 100 ms trailing reconciliation scans.
+- Pin CI action revisions and dependency commits, select Xcode 15.4's system iPhoneOS 17.5 SDK for
+  the actual package, and reject Mach-O outputs whose `LC_BUILD_VERSION` is not SDK 17.5.
+
+### Evidence status
+
+- [x] `tests/run_process_identity_tests.sh` passes.
+- [x] `tests/test_policy_transition.c` covers cleanup failures, identity changes between syscalls,
+  successful throttle/fatal transitions, and best-effort restore.
+- [x] ASan/UBSan host runs pass for both C suites.
+- [x] `tests/check_auto_monitor_path.py` passes as a source-contract check. It is not treated as
+  standalone runtime proof, correcting the older mutant-coverage overstatement above.
+- [x] `python3 -m py_compile tests/check_auto_monitor_path.py` and `git diff --check` pass.
+- [x] Local clean arm64/arm64e Theos package compiles. It remains non-deliverable because the Linux
+  linker emits `incompatible arm64e ABI compiler` warnings.
+- [ ] Fresh pinned macOS/Xcode cloud run passes with nonempty logs and no incompatible-arm64e warning.
+- [ ] Cloud package metadata, architecture, SDK 17.5, chained fixups, dependencies, signatures, and
+  checksums are independently inspected.
+- [ ] Device confirms `runningboardd` stability, rapid-launch coverage, deleted-config restoration,
+  and exact per-target policy parameters.

@@ -6,61 +6,88 @@
 #import "Common.h"
 #import "VDTShared.h"
 
+static NSDictionary *VDTDictionaryFromFile(NSString *path){
+    id loaded = [NSDictionary dictionaryWithContentsOfFile:path];
+    return [loaded isKindOfClass:[NSDictionary class]] ? loaded : @{};
+}
+
+static NSDictionary *VDTValidatedPrefs(id prefs){
+    return [prefs isKindOfClass:[NSDictionary class]] ? prefs : @{};
+}
+
+static NSArray *VDTConfigArray(id value){
+    return [value isKindOfClass:[NSArray class]] ? value : @[];
+}
+
+static NSString *VDTConfigIdentifier(VDTConfigType type){
+    return type == VDTConfigTypeApp ? @"bundleIdentifier" : @"daemonName";
+}
+
+static NSString *VDTConfigSection(VDTConfigType type){
+    return type == VDTConfigTypeApp ? @"appConfigs" : @"daemonConfigs";
+}
+
 NSDictionary* getPrefs(){
-    NSMutableDictionary *prefs = [NSMutableDictionary dictionary];
-    [prefs addEntriesFromDictionary:[NSDictionary dictionaryWithContentsOfFile:PREFS_PATH]];
-    return [prefs copy];
+    return [VDTDictionaryFromFile(PREFS_PATH) copy];
 }
 
 NSDictionary* getTempPrefs(){
-    NSMutableDictionary *prefs = [NSMutableDictionary dictionary];
-    [prefs addEntriesFromDictionary:[NSDictionary dictionaryWithContentsOfFile:PREFS_PATH_TMP]];
-    return [prefs copy];
+    return [VDTDictionaryFromFile(PREFS_PATH_TMP) copy];
 }
 
 id valueForKey(NSString *key){
-    NSMutableDictionary *prefs = [NSMutableDictionary dictionary];
-    [prefs addEntriesFromDictionary:[NSDictionary dictionaryWithContentsOfFile:PREFS_PATH]];
-    return prefs[key] ?: nil;
+    if (![key isKindOfClass:[NSString class]] || key.length == 0) return nil;
+    return VDTDictionaryFromFile(PREFS_PATH)[key];
 }
 
 id valueForKeyWithPrefs(NSString *key, NSDictionary *prefs){
-    if (!prefs){
-        return (valueForKey(key));
-    }
-    return prefs[key] ?: nil;
+    if (![key isKindOfClass:[NSString class]] || key.length == 0) return nil;
+    return prefs ? VDTValidatedPrefs(prefs)[key] : valueForKey(key);
 }
 
 void setValueForKeyWithPrefs(NSString *key, id value, NSDictionary *prefs){
-    NSMutableDictionary *newPrefs;
-    
-    if (!prefs){
-        newPrefs = [NSMutableDictionary dictionary];
-        [newPrefs addEntriesFromDictionary:[NSDictionary dictionaryWithContentsOfFile:PREFS_PATH]];
-    }else{
-        newPrefs = [prefs mutableCopy];
+    if (![key isKindOfClass:[NSString class]] || key.length == 0) return;
+
+    NSDictionary *base = prefs ? VDTValidatedPrefs(prefs) : VDTDictionaryFromFile(PREFS_PATH);
+    NSMutableDictionary *newPrefs = [base mutableCopy];
+    if (value) {
+        newPrefs[key] = value;
+    } else {
+        [newPrefs removeObjectForKey:key];
     }
-    
-    [newPrefs setObject:value forKey:key];
+
     [newPrefs writeToFile:PREFS_PATH atomically:YES];
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (CFStringRef)PREFS_CHANGED_NN, NULL, NULL, YES);
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         (CFStringRef)PREFS_CHANGED_NN,
+                                         NULL,
+                                         NULL,
+                                         YES);
 }
 
 void setValueForKey(NSString *key, id value){
     setValueForKeyWithPrefs(key, value, nil);
 }
 
-id valueForProcessConfigKeyWithPrefs(NSString *identifier, NSString *key, id defaultValue, VDTConfigType type, NSDictionary *prefs){
-    id configs;
-    if (!prefs){
-        configs = valueForKey(type == VDTConfigTypeApp ? @"appConfigs" : @"daemonConfigs");
-    }else{
-        configs = prefs[type == VDTConfigTypeApp ? @"appConfigs" : @"daemonConfigs"];
+id valueForProcessConfigKeyWithPrefs(NSString *identifier,
+                                     NSString *key,
+                                     id defaultValue,
+                                     VDTConfigType type,
+                                     NSDictionary *prefs){
+    if (![identifier isKindOfClass:[NSString class]] || identifier.length == 0 ||
+        ![key isKindOfClass:[NSString class]] || key.length == 0) {
+        return defaultValue;
     }
-    if (configs){
-        NSPredicate *predicate = [NSPredicate predicateWithFormat:@"%K == %@", (type == VDTConfigTypeApp ? @"bundleIdentifier" : @"daemonName"), identifier];
-        NSDictionary *config = [configs filteredArrayUsingPredicate:predicate].firstObject;
-        return config[key] ?: defaultValue;
+
+    NSDictionary *source = prefs ? VDTValidatedPrefs(prefs) : VDTDictionaryFromFile(PREFS_PATH);
+    NSString *identifierKey = VDTConfigIdentifier(type);
+    for (id rawConfig in VDTConfigArray(source[VDTConfigSection(type)])) {
+        if (![rawConfig isKindOfClass:[NSDictionary class]]) continue;
+        NSDictionary *config = rawConfig;
+        id configuredIdentifier = config[identifierKey];
+        if ([configuredIdentifier isKindOfClass:[NSString class]] &&
+            [configuredIdentifier isEqualToString:identifier]) {
+            return config[key] ?: defaultValue;
+        }
     }
     return defaultValue;
 }
@@ -69,36 +96,46 @@ id valueForProcessConfigKey(NSString *identifier, NSString *key, id defaultValue
     return valueForProcessConfigKeyWithPrefs(identifier, key, defaultValue, type, nil);
 }
 
-void setValueForProcessConfigKeyWithPrefs(NSString *identifier, NSString *key, id value, VDTConfigType type, NSDictionary *prefs){
-    NSMutableArray *configs;
-    if (!prefs){
-        configs = [valueForKey(type == VDTConfigTypeApp ? @"appConfigs" : @"daemonConfigs") mutableCopy];
-    }else{
-        configs = [prefs[type == VDTConfigTypeApp ? @"appConfigs" : @"daemonConfigs"] mutableCopy];
+void setValueForProcessConfigKeyWithPrefs(NSString *identifier,
+                                          NSString *key,
+                                          id value,
+                                          VDTConfigType type,
+                                          NSDictionary *prefs){
+    if (![identifier isKindOfClass:[NSString class]] || identifier.length == 0 ||
+        ![key isKindOfClass:[NSString class]] || key.length == 0) {
+        return;
     }
-    
-    if (configs){
-        NSPredicate *predicate = [NSPredicate predicateWithFormat:@"%K == %@", (type == VDTConfigTypeApp ? @"bundleIdentifier" : @"daemonName"), identifier];
-        NSMutableDictionary *config = [[configs filteredArrayUsingPredicate:predicate].firstObject mutableCopy];
-        if (config){
-            NSUInteger idx = [configs indexOfObject:config];
-            config[key] = value;
-            [configs replaceObjectAtIndex:idx withObject:config];
-        }else{
-            config = [NSMutableDictionary dictionary];
-            [configs addObject:@{
-                (type == VDTConfigTypeApp ? @"bundleIdentifier" : @"daemonName"):identifier,
-                key:value
-            }];
+
+    NSDictionary *source = prefs ? VDTValidatedPrefs(prefs) : VDTDictionaryFromFile(PREFS_PATH);
+    NSString *sectionKey = VDTConfigSection(type);
+    NSString *identifierKey = VDTConfigIdentifier(type);
+    NSMutableArray *configs = [VDTConfigArray(source[sectionKey]) mutableCopy];
+    NSUInteger matchedIndex = NSNotFound;
+
+    for (NSUInteger index = 0; index < configs.count; index++) {
+        id rawConfig = configs[index];
+        if (![rawConfig isKindOfClass:[NSDictionary class]]) continue;
+        id configuredIdentifier = ((NSDictionary *)rawConfig)[identifierKey];
+        if ([configuredIdentifier isKindOfClass:[NSString class]] &&
+            [configuredIdentifier isEqualToString:identifier]) {
+            matchedIndex = index;
+            break;
         }
-    }else{
-        configs = [NSMutableArray array];
-        [configs addObject:@{
-            (type == VDTConfigTypeApp ? @"bundleIdentifier" : @"daemonName"):identifier,
-            key:value
-        }];
     }
-    setValueForKeyWithPrefs((type == VDTConfigTypeApp ? @"appConfigs" : @"daemonConfigs"), configs, prefs);
+
+    if (matchedIndex != NSNotFound) {
+        NSMutableDictionary *config = [configs[matchedIndex] mutableCopy];
+        if (value) {
+            config[key] = value;
+        } else {
+            [config removeObjectForKey:key];
+        }
+        configs[matchedIndex] = config;
+    } else if (value) {
+        [configs addObject:@{identifierKey: identifier, key: value}];
+    }
+
+    setValueForKeyWithPrefs(sectionKey, configs, source);
 }
 
 void setValueForProcessConfigKey(NSString *identifier, NSString *key, id value, VDTConfigType type){

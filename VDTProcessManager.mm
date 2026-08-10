@@ -8,6 +8,7 @@
 #import "VDTProbe.h"
 #import "PrivateHeaders.h"
 #import "VDTProcessIdentity.h"
+#import "VDTPolicyTransition.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -116,27 +117,35 @@ static BOOL vdt_policy(id value, VDTViolationPolicy *outPolicy){
 static LSApplicationProxy* appproxy_from_bundle_path(NSString *path){
     if (![path isKindOfClass:[NSString class]] || path.length == 0) return nil;
 
-    NSURL *bundleURL = [NSURL fileURLWithPath:path];
+    NSURL *bundleURL = nil;
+    @try {
+        bundleURL = [NSURL fileURLWithPath:path];
+    } @catch (NSException *exception) {
+        HBLogError(@"Vedette: NSURL exception for path %@: %@ %@", path, exception.name, exception.reason);
+        return nil;
+    }
     Class proxyClass = objc_getClass("LSApplicationProxy");
     if (!bundleURL || ![proxyClass respondsToSelector:@selector(applicationProxyForBundleURL:)]) return nil;
 
     return [proxyClass applicationProxyForBundleURL:bundleURL];
 }
 
+static NSString *application_bundle_path_for_executable(NSString *executablePath){
+    if (![executablePath isKindOfClass:[NSString class]] || executablePath.length == 0) return nil;
+
+    NSString *candidate = executablePath.stringByDeletingLastPathComponent;
+    while (candidate.length > 1) {
+        if ([candidate.pathExtension caseInsensitiveCompare:@"app"] == NSOrderedSame) return candidate;
+        NSString *parent = candidate.stringByDeletingLastPathComponent;
+        if ([parent isEqualToString:candidate]) break;
+        candidate = parent;
+    }
+    return nil;
+}
+
 // Full executable path. Empty string when unavailable, never partial data.
 static BOOL executable_path_for_pid(pid_t pid, char *buffer, uint32_t bufferSize){
     return VDTCopyProcessInfoString(pid, buffer, bufferSize, proc_pidpath);
-}
-
-// The preference bundle stores a daemon's full executable name, so this is the
-// identity that can actually be matched against the user's config.
-static BOOL executable_name_for_pid(pid_t pid, char *out, uint32_t outSize){
-    char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
-    if (!executable_path_for_pid(pid, pathBuffer, sizeof(pathBuffer))) {
-        if (outSize > 0) out[0] = '\0';
-        return NO;
-    }
-    return VDTCopyLastPathComponent(pathBuffer, out, outSize);
 }
 
 // proc_name returns the kernel's possibly truncated p_comm. It is only an exact-
@@ -145,18 +154,21 @@ static BOOL proc_comm_for_pid(pid_t pid, char *out, uint32_t outSize){
     return VDTCopyProcessInfoString(pid, out, outSize, proc_name);
 }
 
-// Best-effort display name for telemetry only. Never used for matching.
-static NSString* display_name_for_pid(pid_t pid){
-    char nameBuffer[PROC_PIDPATHINFO_MAXSIZE];
-    if (executable_name_for_pid(pid, nameBuffer, sizeof(nameBuffer))) {
-        NSString *name = [NSString stringWithUTF8String:nameBuffer];
-        if (name.length > 0) return name;
-    }
-    if (proc_comm_for_pid(pid, nameBuffer, sizeof(nameBuffer))) {
-        NSString *name = [NSString stringWithUTF8String:nameBuffer];
-        if (name.length > 0) return name;
-    }
-    return nil;
+static BOOL process_instance_token_for_pid(pid_t pid, VDTProcessInstanceToken *outToken){
+    if (pid <= 0 || !outToken) return NO;
+
+    struct vdt_proc_bsdinfo info = {};
+    int bytes = proc_pidinfo(pid, VDT_PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+    if (bytes != (int)sizeof(info) || info.pbi_pid != (uint32_t)pid) return NO;
+
+    VDTProcessInstanceToken token = {
+        .seconds = info.pbi_start_tvsec,
+        .microseconds = info.pbi_start_tvusec
+    };
+    if (!VDTProcessInstanceTokenIsValid(token)) return NO;
+
+    *outToken = token;
+    return YES;
 }
 
 #pragma mark - Config normalisation
@@ -171,6 +183,8 @@ NSString * const VDTTargetPidKey = @"pid";
 NSString * const VDTTargetNameKey = @"name";
 NSString * const VDTTargetExecutablePathKey = @"executablePath";
 NSString * const VDTTargetProcCommKey = @"procComm";
+NSString * const VDTTargetStartSecondsKey = @"startSeconds";
+NSString * const VDTTargetStartMicrosecondsKey = @"startMicroseconds";
 
 static NSArray<NSDictionary *> *configs_from_section(NSDictionary *prefs,
                                                      NSString *sectionKey,
@@ -197,8 +211,11 @@ static NSArray<NSDictionary *> *configs_from_section(NSDictionary *prefs,
         BOOL percentageValid = vdt_int(entry[@"percentage"], 80, &percentage);
         BOOL intervalValid = vdt_int(entry[@"interval"], 120, &interval);
         BOOL policyValid = vdt_policy(entry[@"violationPolicy"], &policy);
-        BOOL parametersValid = percentageValid && percentage > 0 && policyValid &&
-            (policy == VDTViolationPolicyThrottle || (intervalValid && interval > 0));
+        BOOL percentageInRange = policy == VDTViolationPolicyThrottle ?
+            percentage <= UINT8_MAX : percentage <= 100;
+        BOOL parametersValid = percentageValid && percentage > 0 && percentageInRange &&
+            policyValid && (policy == VDTViolationPolicyThrottle ||
+            (intervalValid && interval > 0));
         BOOL enabled = globallyEnabled && vdt_bool(entry[@"enabled"], NO) && parametersValid;
 
         [configs addObject:@{
@@ -269,27 +286,36 @@ static NSDictionary *target_for_pid(pid_t pid,
     BOOL hasExecutableName = hasExecutablePath &&
         VDTCopyLastPathComponent(pathBuffer, executableName, sizeof(executableName));
 
+    VDTProcessInstanceToken instanceToken = {};
+    if (!process_instance_token_for_pid(pid, &instanceToken)) return nil;
+
     NSDictionary *matched = nil;
     NSString *matchedName = nil;
     NSString *fallbackProcComm = nil;
 
-    // App identity takes priority over an executable-name collision with a
-    // daemon config. (The baseline scan path checked daemons first; this order
-    // is intentionally reversed because a verified bundle identifier is a
-    // stronger identity than a file name match.)
-    if (appConfigsById.count > 0 && executablePath) {
-        LSApplicationProxy *appProxy = appproxy_from_bundle_path(executablePath.stringByDeletingLastPathComponent);
-        NSString *bundleIdentifier = appProxy.bundleIdentifier;
-        if ([bundleIdentifier isKindOfClass:[NSString class]] && bundleIdentifier.length > 0) {
-            NSDictionary *config = appConfigsById[bundleIdentifier];
-            if (config) {
-                matched = config;
-                matchedName = bundleIdentifier;
+    // A verified App identity is authoritative even when that App has no App
+    // config. It must never fall through to an unrelated daemon entry that
+    // happens to share the executable filename.
+    BOOL resolvedAsApplication = NO;
+    if (executablePath) {
+        NSString *bundlePath = application_bundle_path_for_executable(executablePath);
+        resolvedAsApplication = bundlePath != nil;
+
+        if (bundlePath && appConfigsById.count > 0) {
+            LSApplicationProxy *appProxy = appproxy_from_bundle_path(bundlePath);
+            NSString *bundleIdentifier = appProxy.bundleIdentifier;
+            if ([bundleIdentifier isKindOfClass:[NSString class]] && bundleIdentifier.length > 0) {
+                resolvedAsApplication = YES;
+                NSDictionary *config = appConfigsById[bundleIdentifier];
+                if (config) {
+                    matched = config;
+                    matchedName = bundleIdentifier;
+                }
             }
         }
     }
 
-    if (!matched && daemonConfigs.count > 0) {
+    if (!matched && !resolvedAsApplication && daemonConfigs.count > 0) {
         char procComm[256];
         BOOL hasProcComm = !hasExecutableName && proc_comm_for_pid(pid, procComm, sizeof(procComm));
         if (!hasExecutableName && !hasProcComm) return nil;
@@ -314,8 +340,9 @@ static NSDictionary *target_for_pid(pid_t pid,
 
     if (!matched) return nil;
 
+    NSNumber *typeValue = vdt_number(matched[VDTConfigTypeKey]);
     NSNumber *enabledValue = vdt_number(matched[VDTConfigEnabledKey]);
-    if (!enabledValue) return nil;
+    if (!typeValue || !enabledValue) return nil;
 
     BOOL enabled = enabledValue.boolValue;
     NSNumber *percentage = enabled ? vdt_number(matched[VDTConfigPercentageKey]) : @0;
@@ -326,11 +353,14 @@ static NSDictionary *target_for_pid(pid_t pid,
     NSMutableDictionary *target = [@{
         VDTTargetPidKey: @(pid),
         VDTTargetNameKey: matchedName ?: @"",
+        VDTConfigTypeKey: typeValue,
         // A disabled entry resolves to zero, which the syscall layer treats as
         // "restore system defaults" rather than "apply a fatal limit".
         VDTConfigPercentageKey: percentage,
         VDTConfigIntervalKey: interval,
-        VDTConfigPolicyKey: policy
+        VDTConfigPolicyKey: policy,
+        VDTTargetStartSecondsKey: @(instanceToken.seconds),
+        VDTTargetStartMicrosecondsKey: @(instanceToken.microseconds)
     } mutableCopy];
 
     // Bind the identity observed during resolution to the target. The syscall
@@ -402,175 +432,212 @@ NSArray<NSDictionary *>* vdt_targets_for_pid(pid_t pid, NSArray<NSDictionary *> 
 
 #pragma mark - Monitor / throttle
 
+static BOOL target_instance_token(NSDictionary *target, VDTProcessInstanceToken *outToken){
+    if (!outToken) return NO;
+
+    NSNumber *seconds = vdt_number(target[VDTTargetStartSecondsKey]);
+    NSNumber *microseconds = vdt_number(target[VDTTargetStartMicrosecondsKey]);
+    if (!seconds || !microseconds) return NO;
+
+    VDTProcessInstanceToken token = {
+        .seconds = seconds.unsignedLongLongValue,
+        .microseconds = microseconds.unsignedLongLongValue
+    };
+    if (!VDTProcessInstanceTokenIsValid(token)) return NO;
+
+    *outToken = token;
+    return YES;
+}
+
 static BOOL target_identity_is_current(NSDictionary *target, pid_t pid){
+    VDTProcessInstanceToken expectedToken = {};
+    VDTProcessInstanceToken beforeToken = {};
+    VDTProcessInstanceToken afterToken = {};
+    if (!target_instance_token(target, &expectedToken) ||
+        !process_instance_token_for_pid(pid, &beforeToken) ||
+        !VDTProcessInstanceMatches(expectedToken, beforeToken)) {
+        return NO;
+    }
+
+    BOOL identityMatches = NO;
     NSString *expectedPath = vdt_nonEmptyString(target[VDTTargetExecutablePathKey]);
     if (expectedPath) {
         char currentPath[PROC_PIDPATHINFO_MAXSIZE];
         if (!executable_path_for_pid(pid, currentPath, sizeof(currentPath))) return NO;
 
         NSString *current = [NSString stringWithUTF8String:currentPath];
-        return current.length > 0 && [current isEqualToString:expectedPath];
-    }
+        identityMatches = current.length > 0 && [current isEqualToString:expectedPath];
+    } else {
+        NSString *expectedComm = vdt_nonEmptyString(target[VDTTargetProcCommKey]);
+        if (!expectedComm) return NO;
 
-    NSString *expectedComm = vdt_nonEmptyString(target[VDTTargetProcCommKey]);
-    if (expectedComm) {
         char currentComm[256];
         if (!proc_comm_for_pid(pid, currentComm, sizeof(currentComm))) return NO;
 
         NSString *current = [NSString stringWithUTF8String:currentComm];
-        return current.length > 0 && [current isEqualToString:expectedComm];
+        identityMatches = current.length > 0 && [current isEqualToString:expectedComm];
     }
+    if (!identityMatches) return NO;
 
-    return NO;
+    // Read the lifetime token again after the path/name lookup. If the PID was
+    // recycled during identity validation, the two observations cannot both
+    // belong to the target instance.
+    return process_instance_token_for_pid(pid, &afterToken) &&
+        VDTProcessInstanceMatches(expectedToken, afterToken);
 }
 
-void vdt_apply_targets(NSArray<NSDictionary *> *targets){
-    for (id rawTarget in targets) {
-        NSDictionary *target = vdt_dictionary(rawTarget);
-        NSNumber *pidValue = vdt_number(target[VDTTargetPidKey]);
-        NSNumber *percentageValue = vdt_number(target[VDTConfigPercentageKey]);
-        NSNumber *intervalValue = vdt_number(target[VDTConfigIntervalKey]);
-        NSNumber *policyValue = vdt_number(target[VDTConfigPolicyKey]);
-        if (!target || !pidValue || !percentageValue || !intervalValue || !policyValue) continue;
+BOOL vdt_target_instance_is_current(NSDictionary *rawTarget){
+    NSDictionary *target = vdt_dictionary(rawTarget);
+    NSNumber *pidValue = vdt_number(target[VDTTargetPidKey]);
+    if (!target || !pidValue || pidValue.intValue <= 0) return NO;
 
-        pid_t pid = (pid_t)pidValue.intValue;
-        if (pid <= 0) continue;
+    VDTProcessInstanceToken expectedToken = {};
+    VDTProcessInstanceToken currentToken = {};
+    return target_instance_token(target, &expectedToken) &&
+        process_instance_token_for_pid((pid_t)pidValue.intValue, &currentToken) &&
+        VDTProcessInstanceMatches(expectedToken, currentToken);
+}
 
-        if (!target_identity_is_current(target, pid)) {
-            VDTProbeRecord(@"runningboardd.targetSkipped", @{
-                @"pid": @(pid),
-                @"name": target[VDTTargetNameKey] ?: @"",
-                @"reason": @"identityChangedOrUnavailable"
-            });
-            continue;
+BOOL vdt_target_is_current(NSDictionary *rawTarget){
+    NSDictionary *target = vdt_dictionary(rawTarget);
+    NSNumber *pidValue = vdt_number(target[VDTTargetPidKey]);
+    if (!target || !pidValue || pidValue.intValue <= 0) return NO;
+    return target_identity_is_current(target, (pid_t)pidValue.intValue);
+}
+
+static bool policy_identity_current(pid_t pid, void *context){
+    NSDictionary *target = (__bridge NSDictionary *)context;
+    return target_identity_is_current(target, pid);
+}
+
+static int policy_clear_cpu_limits(pid_t pid, void *context){
+    (void)context;
+    return proc_clear_cpulimits(pid);
+}
+
+static int policy_disable_cpu_monitor(pid_t pid, void *context){
+    (void)context;
+    return proc_disable_cpumon(pid);
+}
+
+static int policy_set_cpu_monitor_defaults(pid_t pid, void *context){
+    (void)context;
+    return proc_set_cpumon_defaults(pid);
+}
+
+static int policy_resume_cpu_monitor(pid_t pid, void *context){
+    (void)context;
+    return proc_resume_cpumon(pid);
+}
+
+static int policy_set_throttle(pid_t pid, int percentage, void *context){
+    (void)context;
+    return proc_setcpu_percentage(pid, PROC_SETCPU_ACTION_THROTTLE, percentage);
+}
+
+static int policy_set_fatal(pid_t pid, int percentage, int interval, void *context){
+    (void)context;
+    return proc_set_cpumon_params_fatal(pid, percentage, interval);
+}
+
+BOOL vdt_apply_target(NSDictionary *rawTarget){
+    NSDictionary *target = vdt_dictionary(rawTarget);
+    NSNumber *pidValue = vdt_number(target[VDTTargetPidKey]);
+    NSNumber *percentageValue = vdt_number(target[VDTConfigPercentageKey]);
+    NSNumber *intervalValue = vdt_number(target[VDTConfigIntervalKey]);
+    NSNumber *policyValue = vdt_number(target[VDTConfigPolicyKey]);
+    if (!target || !pidValue || !percentageValue || !intervalValue || !policyValue) return NO;
+
+    pid_t pid = (pid_t)pidValue.intValue;
+    if (pid <= 0) return NO;
+
+    int percentage = percentageValue.intValue;
+    int interval = intervalValue.intValue;
+    VDTViolationPolicy policy = (VDTViolationPolicy)policyValue.unsignedLongValue;
+    VDTPolicyMode mode = VDTPolicyModeRestore;
+    if (policy == VDTViolationPolicyThrottle && percentage > 0 && percentage <= UINT8_MAX) {
+        mode = VDTPolicyModeThrottle;
+    } else if (policy == VDTViolationPolicyMonitorAndTerminate &&
+               percentage > 0 && percentage <= 100 && interval > 0) {
+        mode = VDTPolicyModeFatal;
+    }
+
+    VDTPolicyOperations operations = {
+        .identityCurrent = policy_identity_current,
+        .clearCpuLimits = policy_clear_cpu_limits,
+        .disableCpuMonitor = policy_disable_cpu_monitor,
+        .setCpuMonitorDefaults = policy_set_cpu_monitor_defaults,
+        .resumeCpuMonitor = policy_resume_cpu_monitor,
+        .setThrottle = policy_set_throttle,
+        .setFatal = policy_set_fatal,
+        .context = (__bridge void *)target
+    };
+
+    errno = 0;
+    VDTPolicyTransitionResult result = VDTApplyPolicyTransition(
+        pid, mode, percentage, interval, &operations);
+    int operationErrno = errno;
+
+    if (result.identityRejected) {
+        VDTProbeRecord(@"runningboardd.targetSkipped", @{
+            @"pid": @(pid),
+            @"name": target[VDTTargetNameKey] ?: @"",
+            @"reason": @"identityChangedOrUnavailable"
+        });
+    }
+
+    if (mode == VDTPolicyModeThrottle) {
+        if (result.success) {
+            HBLogDebug(@"Throttled pid %d with percentage %d%%", pid, percentage);
         }
-
-        int percentage = percentageValue.intValue;
-        int interval = intervalValue.intValue;
-        VDTViolationPolicy policy = (VDTViolationPolicy)policyValue.unsignedLongValue;
-
-        if (percentage < 0) percentage = 0;
-        if (interval < 0) interval = 0;
-
-        if (policy == VDTViolationPolicyThrottle && percentage > 0) {
-            // A process may have been using the terminate policy before this
-            // reload. Remove that monitor before installing the throttle.
-            int disableRet = proc_disable_cpumon(pid);
-            int defaultsRet = proc_set_cpumon_defaults(pid);
-            int resumeRet = proc_resume_cpumon(pid);
-
-            errno = 0;
-            int setRet = proc_setcpu_percentage(pid, PROC_SETCPU_ACTION_THROTTLE, percentage);
-            int setErrno = errno;
-            if (setRet == 0) {
-                HBLogDebug(@"Throttled pid %d with percentage %d%%", pid, percentage);
-            }
-            VDTProbeRecord(@"runningboardd.throttleSyscall", @{
-                @"pid": @(pid),
-                @"name": target[VDTTargetNameKey] ?: @"",
-                @"requestedPercentage": @(percentage),
-                @"disableRet": @(disableRet),
-                @"defaultsRet": @(defaultsRet),
-                @"resumeRet": @(resumeRet),
-                @"setRet": @(setRet),
-                @"setErrno": @(setErrno)
-            });
-            continue;
+        VDTProbeRecord(@"runningboardd.throttleSyscall", @{
+            @"pid": @(pid),
+            @"name": target[VDTTargetNameKey] ?: @"",
+            @"requestedPercentage": @(percentage),
+            @"disableRet": @(result.disableResult),
+            @"defaultsRet": @(result.defaultsResult),
+            @"resumeRet": @(result.resumeResult),
+            @"setRet": @(result.applyResult),
+            @"retirementFailed": @(result.retirementFailed),
+            @"identityRejected": @(result.identityRejected),
+            @"errno": @(operationErrno)
+        });
+    } else if (mode == VDTPolicyModeFatal) {
+        if (result.success) {
+            HBLogDebug(@"Monitoring pid %d with percentage %d%% and interval %ds", pid, percentage, interval);
         }
-
-        if (policy == VDTViolationPolicyMonitorAndTerminate && percentage > 0 && interval > 0) {
-            // Likewise, remove an earlier throttle before arming the fatal CPU
-            // monitor so only the currently selected policy remains active.
-            int clearRet = proc_clear_cpulimits(pid);
-            int disableRet = proc_disable_cpumon(pid);
-            int setRet = proc_set_cpumon_params_fatal(pid, percentage, interval);
-            if (setRet == 0) {
-                HBLogDebug(@"Monitoring pid %d with percentage %d%% and interval %ds", pid, percentage, interval);
-            }
-            int resumeRet = proc_resume_cpumon(pid);
-            VDTProbeRecord(@"runningboardd.monitorSyscall", @{
-                @"pid": @(pid),
-                @"name": target[VDTTargetNameKey] ?: @"",
-                @"percentage": @(percentage),
-                @"interval": @(interval),
-                @"clearRet": @(clearRet),
-                @"disableRet": @(disableRet),
-                @"setRet": @(setRet),
-                @"resumeRet": @(resumeRet)
-            });
-            continue;
-        }
-
-        // Restore path: the entry exists but is switched off, so undo whatever
-        // this tweak previously applied and hand the process back to the system.
-        errno = 0;
-        int clearRet = proc_clear_cpulimits(pid);
-        int disableRet = proc_disable_cpumon(pid);
-        int defaultsRet = proc_set_cpumon_defaults(pid);
-        int resumeRet = proc_resume_cpumon(pid);
-        HBLogDebug(@"Restored CPU limits for pid %d", pid);
+        VDTProbeRecord(@"runningboardd.monitorSyscall", @{
+            @"pid": @(pid),
+            @"name": target[VDTTargetNameKey] ?: @"",
+            @"percentage": @(percentage),
+            @"interval": @(interval),
+            @"clearRet": @(result.clearResult),
+            @"disableRet": @(result.disableResult),
+            @"setRet": @(result.applyResult),
+            @"resumeRet": @(result.resumeResult),
+            @"retirementFailed": @(result.retirementFailed),
+            @"identityRejected": @(result.identityRejected),
+            @"errno": @(operationErrno)
+        });
+    } else {
+        if (result.success) HBLogDebug(@"Restored CPU limits for pid %d", pid);
         VDTProbeRecord(@"runningboardd.restoreSyscall", @{
             @"pid": @(pid),
             @"name": target[VDTTargetNameKey] ?: @"",
-            @"clearRet": @(clearRet),
-            @"disableRet": @(disableRet),
-            @"defaultsRet": @(defaultsRet),
-            @"resumeRet": @(resumeRet),
-            @"errno": @(errno)
+            @"clearRet": @(result.clearResult),
+            @"disableRet": @(result.disableResult),
+            @"defaultsRet": @(result.defaultsResult),
+            @"resumeRet": @(result.resumeResult),
+            @"identityRejected": @(result.identityRejected),
+            @"errno": @(operationErrno)
         });
     }
+
+    return result.success;
 }
 
-#pragma mark - New process handler
-
-void received_new_proc(pid_t pid){
-    if (pid <= 0) return;
-
-    // Every process self-reports its PID, because reading the prefs plist from an
-    // App process is unreliable on roothide. That makes this handler the place
-    // where the user's opt-in is enforced: a process the user never configured
-    // must not receive any CPU limit at all.
-    NSDictionary *prefs = VDTGetPrefs();
-    if (!prefs) {
-        VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
-            @"pid": @(pid),
-            @"reason": @"prefsUnavailable"
-        });
-        return;
+void vdt_apply_targets(NSArray<NSDictionary *> *targets){
+    for (id target in targets) {
+        vdt_apply_target(target);
     }
-
-    NSArray<NSDictionary *> *configs = vdt_configs_from_prefs(prefs);
-    if (configs.count == 0) return;
-
-    NSArray<NSDictionary *> *targets = vdt_targets_for_pid(pid, configs);
-    if (targets.count == 0) {
-        VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
-            @"pid": @(pid),
-            @"name": display_name_for_pid(pid) ?: @"",
-            @"reason": @"notConfigured"
-        });
-        return;
-    }
-
-    NSDictionary *target = targets.firstObject;
-    if ([target[VDTConfigPolicyKey] unsignedLongValue] == VDTViolationPolicyNone) {
-        // Configured but switched off. Nothing to enforce, and a freshly launched
-        // process already starts from the system defaults.
-        VDTProbeRecord(@"runningboardd.receivedNewProcSkipped", @{
-            @"pid": @(pid),
-            @"name": target[VDTTargetNameKey] ?: @"",
-            @"reason": @"configuredButDisabled"
-        });
-        return;
-    }
-
-    VDTProbeRecord(@"runningboardd.receivedNewProcResolved", @{
-        @"pid": @(pid),
-        @"name": target[VDTTargetNameKey] ?: @"",
-        @"percentage": target[VDTConfigPercentageKey] ?: @0,
-        @"interval": target[VDTConfigIntervalKey] ?: @0,
-        @"violationPolicy": target[VDTConfigPolicyKey] ?: @0
-    });
-
-    vdt_apply_targets(targets);
 }
