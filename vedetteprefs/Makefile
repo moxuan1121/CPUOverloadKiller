@@ -14,6 +14,9 @@ VedettePrefs_PRIVATE_FRAMEWORKS = Preferences
 VedettePrefs_EXTRA_FRAMEWORKS = AltList
 VedettePrefs_INSTALL_PATH = /Library/PreferenceBundles
 VedettePrefs_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+VedettePrefs_LDFLAGS += -F$(THEOS)/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks
+endif
 VedettePrefs_LDFLAGS += -Wl,-rpath,@loader_path/../../Frameworks
 
 include $(THEOS_MAKE_PATH)/bundle.mk
