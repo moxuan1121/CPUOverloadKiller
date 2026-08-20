@@ -130,7 +130,11 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededNanoseconds = 0;
-        if (trackedPID > 0 && read_aweme_identity(trackedPID, &trackedPath, &trackedStartTime)) {
+        NSString *newPath = nil;
+        uint64_t newStartTime = 0;
+        if (trackedPID > 0 && read_aweme_identity(trackedPID, &newPath, &newStartTime)) {
+            trackedPath = newPath;
+            trackedStartTime = newStartTime;
             HBLogInfo(@"AwemeCPUGuard: tracking Aweme PID %d", trackedPID);
         } else {
             trackedPID = 0;
