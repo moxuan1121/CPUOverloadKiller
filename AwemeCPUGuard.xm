@@ -1,5 +1,4 @@
 #import "Common.h"
-#import "PrivateHeaders.h"
 #import "VDTShared.h"
 
 #include <libproc/libproc.h>
@@ -39,8 +38,14 @@ static BOOL aweme_pid_is_current(pid_t pid) {
     NSRange appRange = [path rangeOfString:@".app/" options:NSBackwardsSearch];
     if (appRange.location == NSNotFound) return NO;
     NSString *bundlePath = [path substringToIndex:appRange.location + 4];
-    LSApplicationProxy *proxy = [objc_getClass("LSApplicationProxy") applicationProxyForBundleURL:[NSURL fileURLWithPath:bundlePath]];
-    return [proxy.bundleIdentifier isEqualToString:kAwemeBundleIdentifier];
+    // LSApplicationProxy is not reliable from runningboardd on every
+    // RootHide setup. The bundle's Info.plist is the authoritative identity
+    // source and is readable without depending on LaunchServices state.
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+        [bundlePath stringByAppendingPathComponent:@"Info.plist"]];
+    NSString *bundleIdentifier = [info[@"CFBundleIdentifier"] isKindOfClass:[NSString class]]
+        ? info[@"CFBundleIdentifier"] : nil;
+    return [bundleIdentifier isEqualToString:kAwemeBundleIdentifier];
 }
 
 static BOOL read_aweme_identity(pid_t pid, NSString **outPath, uint64_t *outStartTime) {
