@@ -22,8 +22,8 @@
     [conditions setProperty:@"两个数值均可手动输入。CPU 低于阈值时，连续超标计时会立即清零。" forKey:@"footerText"];
     [items addObject:conditions];
 
-    PSTextFieldSpecifier *threshold = [PSTextFieldSpecifier preferenceSpecifierNamed:@"总 CPU 上限 (%)" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSEditTextCell edit:nil];
-    [threshold setKeyboardType:UIKeyboardTypeNumberPad autoCaps:UITextAutocapitalizationTypeNone autoCorrection:UITextAutocorrectionTypeNo];
+    PSSpecifier *threshold = [PSSpecifier preferenceSpecifierNamed:@"总 CPU 上限 (%)" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSEditTextCell edit:nil];
+    [threshold setProperty:@(UIKeyboardTypeNumberPad) forKey:@"keyboardType"];
     [threshold setProperty:@"cpuThreshold" forKey:@"key"];
     [threshold setProperty:@80 forKey:@"default"];
     [threshold setProperty:@"80" forKey:@"placeholder"];
@@ -31,8 +31,8 @@
     [threshold setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];
     [items addObject:threshold];
 
-    PSTextFieldSpecifier *duration = [PSTextFieldSpecifier preferenceSpecifierNamed:@"连续超标 (秒)" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSEditTextCell edit:nil];
-    [duration setKeyboardType:UIKeyboardTypeNumberPad autoCaps:UITextAutocapitalizationTypeNone autoCorrection:UITextAutocorrectionTypeNo];
+    PSSpecifier *duration = [PSSpecifier preferenceSpecifierNamed:@"连续超标 (秒)" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSEditTextCell edit:nil];
+    [duration setProperty:@(UIKeyboardTypeNumberPad) forKey:@"keyboardType"];
     [duration setProperty:@"durationSeconds" forKey:@"key"];
     [duration setProperty:@10 forKey:@"default"];
     [duration setProperty:@"10" forKey:@"placeholder"];
