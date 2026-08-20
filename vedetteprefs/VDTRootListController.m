@@ -8,7 +8,7 @@
     NSMutableArray *items = [NSMutableArray array];
 
     PSSpecifier *group = [PSSpecifier preferenceSpecifierNamed:@"抖音 CPU 保护" target:nil set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-    [group setProperty:@"只监控 com.ss.iphone.ugc.Aweme。进程所有线程的 CPU 总和连续超过阈值达到设定秒数后，将终止抖音进程。" forKey:@"footerText"];
+    [group setProperty:@"只监控 com.ss.iphone.ugc.Aweme。进程所有线程的 CPU 总和达到或超过阈值并连续保持设定秒数后，将终止抖音进程。" forKey:@"footerText"];
     [items addObject:group];
 
     PSSpecifier *enabled = [PSSpecifier preferenceSpecifierNamed:@"启用 CPU 保护" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSSwitchCell edit:nil];
@@ -53,7 +53,7 @@
     if ([key isEqualToString:@"cpuThreshold"] || [key isEqualToString:@"durationSeconds"]) {
         NSInteger number = [value integerValue];
         NSInteger minimum = [key isEqualToString:@"cpuThreshold"] ? 1 : 1;
-        NSInteger maximum = [key isEqualToString:@"cpuThreshold"] ? 100 : 3600;
+        NSInteger maximum = [key isEqualToString:@"cpuThreshold"] ? 1000 : 3600;
         if (number < minimum) number = minimum;
         if (number > maximum) number = maximum;
         value = @(number);

@@ -43,6 +43,32 @@ static BOOL aweme_pid_is_current(pid_t pid) {
     return [proxy.bundleIdentifier isEqualToString:kAwemeBundleIdentifier];
 }
 
+static BOOL read_aweme_identity(pid_t pid, NSString **outPath, uint64_t *outStartTime) {
+    if (pid <= 0 || !aweme_pid_is_current(pid)) return NO;
+
+    char executablePath[PROC_PIDPATHINFO_MAXSIZE] = {0};
+    aweme_rusage_info_v0 usage = {};
+    if (proc_pidpath(pid, executablePath, sizeof(executablePath)) <= 0 ||
+        proc_pid_rusage(pid, RUSAGE_INFO_V0, &usage) != 0) {
+        return NO;
+    }
+
+    NSString *path = [NSString stringWithUTF8String:executablePath];
+    if (!path.length || usage.processStartAbsoluteTime == 0) return NO;
+    if (outPath) *outPath = path;
+    if (outStartTime) *outStartTime = usage.processStartAbsoluteTime;
+    return YES;
+}
+
+static BOOL aweme_pid_matches_identity(pid_t pid, NSString *expectedPath, uint64_t expectedStartTime) {
+    NSString *currentPath = nil;
+    uint64_t currentStartTime = 0;
+    return expectedPath.length && expectedStartTime != 0 &&
+        read_aweme_identity(pid, &currentPath, &currentStartTime) &&
+        currentStartTime == expectedStartTime &&
+        [currentPath isEqualToString:expectedPath];
+}
+
 static pid_t find_aweme_pid(void) {
     int byteCount = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
     if (byteCount <= 0) return 0;
@@ -77,26 +103,40 @@ static int validated_integer(id value, int fallback, int lower, int upper) {
 
 static void run_aweme_cpu_guard(void) {
     static pid_t trackedPID = 0;
+    static NSString *trackedPath = nil;
+    static uint64_t trackedStartTime = 0;
     static uint64_t previousCPU = 0;
     static uint64_t previousWall = 0;
-    static uint64_t exceededSince = 0;
+    static uint64_t exceededNanoseconds = 0;
 
     NSDictionary *prefs = getPrefs() ?: @{};
     BOOL enabled = prefs[@"enabled"] ? [prefs[@"enabled"] boolValue] : YES;
-    int threshold = validated_integer(prefs[@"cpuThreshold"], 80, 1, 100);
+    int threshold = validated_integer(prefs[@"cpuThreshold"], 80, 1, 1000);
     int duration = validated_integer(prefs[@"durationSeconds"], 10, 1, 3600);
     if (!enabled) {
         trackedPID = 0;
-        exceededSince = 0;
+        trackedPath = nil;
+        trackedStartTime = 0;
+        previousCPU = 0;
+        previousWall = 0;
+        exceededNanoseconds = 0;
         return;
     }
 
-    if (trackedPID <= 0 || !aweme_pid_is_current(trackedPID)) {
+    if (trackedPID <= 0 || !aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
         trackedPID = find_aweme_pid();
+        trackedPath = nil;
+        trackedStartTime = 0;
         previousCPU = 0;
         previousWall = 0;
-        exceededSince = 0;
-        if (trackedPID > 0) HBLogInfo(@"AwemeCPUGuard: tracking Aweme PID %d", trackedPID);
+        exceededNanoseconds = 0;
+        if (trackedPID > 0 && read_aweme_identity(trackedPID, &trackedPath, &trackedStartTime)) {
+            HBLogInfo(@"AwemeCPUGuard: tracking Aweme PID %d", trackedPID);
+        } else {
+            trackedPID = 0;
+            trackedPath = nil;
+            trackedStartTime = 0;
+        }
     }
     if (trackedPID <= 0) return;
 
@@ -104,7 +144,11 @@ static void run_aweme_cpu_guard(void) {
     uint64_t currentWall = monotonic_nanoseconds();
     if (!read_total_cpu_nanoseconds(trackedPID, &currentCPU)) {
         trackedPID = 0;
-        exceededSince = 0;
+        trackedPath = nil;
+        trackedStartTime = 0;
+        previousCPU = 0;
+        previousWall = 0;
+        exceededNanoseconds = 0;
         return;
     }
     if (previousWall == 0 || currentWall <= previousWall || currentCPU < previousCPU) {
@@ -119,19 +163,21 @@ static void run_aweme_cpu_guard(void) {
     previousCPU = currentCPU;
     previousWall = currentWall;
 
-    if (totalCPUPercent > threshold) {
-        if (exceededSince == 0) exceededSince = currentWall;
-        uint64_t elapsed = currentWall - exceededSince;
-        if (elapsed >= (uint64_t)duration * kNanosecondsPerSecond && aweme_pid_is_current(trackedPID)) {
-            HBLogInfo(@"AwemeCPUGuard: SIGKILL pid %d; total CPU %.1f%% exceeded %d%% for %d seconds", trackedPID, totalCPUPercent, threshold, duration);
-            kill(trackedPID, SIGKILL);
+    if (totalCPUPercent >= threshold) {
+        exceededNanoseconds += wallDelta;
+        if (exceededNanoseconds >= (uint64_t)duration * kNanosecondsPerSecond &&
+            aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
+            HBLogInfo(@"AwemeCPUGuard: SIGKILL pid %d; total CPU %.1f%% reached %d%% for %d seconds", trackedPID, totalCPUPercent, threshold, duration);
+            (void)kill(trackedPID, SIGKILL);
             trackedPID = 0;
-            exceededSince = 0;
+            trackedPath = nil;
+            trackedStartTime = 0;
+            exceededNanoseconds = 0;
             previousCPU = 0;
             previousWall = 0;
         }
     } else {
-        exceededSince = 0;
+        exceededNanoseconds = 0;
     }
 }
 
