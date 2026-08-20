@@ -9,6 +9,7 @@
 
 static NSString * const kAwemeBundleIdentifier = @"com.ss.iphone.ugc.Aweme";
 static const uint64_t kNanosecondsPerSecond = 1000000000ULL;
+static dispatch_source_t gMonitorTimer;
 
 typedef struct {
     uint8_t uuid[16];
@@ -95,6 +96,7 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededSince = 0;
+        if (trackedPID > 0) HBLogInfo(@"AwemeCPUGuard: tracking Aweme PID %d", trackedPID);
     }
     if (trackedPID <= 0) return;
 
@@ -138,10 +140,11 @@ static void run_aweme_cpu_guard(void) {
         if (![[[NSProcessInfo processInfo] processName] isEqualToString:@"runningboardd"]) return;
         dispatch_async(dispatch_get_main_queue(), ^{
             dispatch_queue_t queue = dispatch_queue_create("com.moxuan.awemecpuguard.monitor", DISPATCH_QUEUE_SERIAL);
-            dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-            dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_MSEC * 100);
-            dispatch_source_set_event_handler(timer, ^{ @autoreleasepool { run_aweme_cpu_guard(); } });
-            dispatch_resume(timer);
+            gMonitorTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+            dispatch_source_set_timer(gMonitorTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_MSEC * 100);
+            dispatch_source_set_event_handler(gMonitorTimer, ^{ @autoreleasepool { run_aweme_cpu_guard(); } });
+            dispatch_resume(gMonitorTimer);
+            HBLogInfo(@"AwemeCPUGuard: total CPU monitor started in runningboardd");
         });
     }
 }
