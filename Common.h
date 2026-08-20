@@ -1,40 +1,19 @@
-//  Copyright (c) 2021 udevs
-//
-//  This file is subject to the terms and conditions defined in
-//  file 'LICENSE', which is part of this source code package.
-
 #include <Foundation/Foundation.h>
 #include <HBLog.h>
 #include <objc/runtime.h>
 #include <roothide.h>
 
-#define VEDETTE_IDENTIFIER @"com.udevs.vedette"
+#define VEDETTE_IDENTIFIER @"com.moxuan.awemecpuguard"
 
-// Runtime-resolved paths for roothide compatibility.
-// jbroot() returns the original path on rootless, remapped path on roothide.
 static inline NSString *VDTPrefsPath(void) {
     static NSString *path;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        path = jbroot(@"/var/mobile/Library/Preferences/com.udevs.vedette.plist");
-    });
-    return path;
-}
-
-static inline NSString *VDTPrefsPathTmp(void) {
-    static NSString *path;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        path = jbroot(@"/var/tmp/com.udevs.vedette.plist");
+        path = jbroot(@"/var/mobile/Library/Preferences/com.moxuan.awemecpuguard.plist");
     });
     return path;
 }
 
 #define PREFS_PATH VDTPrefsPath()
-#define PREFS_PATH_TMP VDTPrefsPathTmp()
-
-#define NOTIFY_PID_NN "com.udevs.vedette.notify-pid"
-#define PREFS_CHANGED_NN @"com.udevs.vedette.prefschanged"
-#define RESTORE_ALL_MONITORS_NN @"com.udevs.vedette.restore-all-monitors"
-
+#define PREFS_CHANGED_NN @"com.moxuan.awemecpuguard.prefschanged"
 #define VDT_JBROOT_PATH(path) jbroot(@(path))

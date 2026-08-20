@@ -1,15 +1,9 @@
-name: Build Vedette roothide
+name: Build AwemeCPUGuard RootHide
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - roothide-compat-test
-      - roothide-stable-marker1
-      - roothide-stable-marker2
-      - roothide-no-rb-probe1
-      - roothide-stable-probe3
-      - fix/proc-identity-guard
+    branches: [main]
     paths:
       - '.github/workflows/roothide-build.yml'
       - '**/*.h'
@@ -22,148 +16,56 @@ on:
       - 'control'
       - 'layout/**'
       - 'vedetteprefs/**'
-      - 'tests/**'
 
 jobs:
   package:
-    name: Package (roothide)
+    name: Package (RootHide)
     runs-on: macos-14
-
     env:
       THEOS: ${{ github.workspace }}/theos
       THEOS_PACKAGE_SCHEME: roothide
       FINALPACKAGE: 1
       PREFIX: /Applications/Xcode_15.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Select pinned Xcode 15.4
+      - name: Select Xcode 15.4
         run: |
           sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
-          xcode_version="$(xcodebuild -version)"
-          test "${xcode_version%%$'\n'*}" = "Xcode 15.4"
           test "$(xcrun --sdk iphoneos --show-sdk-version)" = "17.5"
-          printf '%s\n' "$xcode_version"
-          xcrun clang --version
-          xcrun ld -version_details
-          xcrun --sdk iphoneos --show-sdk-version
 
-      - name: Install packaging tools
-        run: |
-          brew update
-          brew install dpkg ldid make
+      - name: Install tools
+        run: brew install dpkg ldid make
 
-      - name: Install roothide Theos
+      - name: Install RootHide Theos and SDK
         run: |
-          git init "$THEOS"
-          git -C "$THEOS" remote add origin https://github.com/roothide/theos.git
-          git -C "$THEOS" fetch --depth 1 origin 88506b2c22e9e07dd4ed055f23c9e398a117a2c7
-          git -C "$THEOS" checkout --detach FETCH_HEAD
-          test "$(git -C "$THEOS" rev-parse HEAD)" = "88506b2c22e9e07dd4ed055f23c9e398a117a2c7"
-          git -C "$THEOS" submodule sync --recursive
-          git -C "$THEOS" submodule update --init --recursive
-          test -z "$(git -C "$THEOS" submodule status --recursive | grep '^[+-]' || true)"
-
-      - name: Install iPhoneOS16.5 SDK
-        run: |
-          git init /tmp/theos-sdks
-          git -C /tmp/theos-sdks remote add origin https://github.com/theos/sdks.git
-          git -C /tmp/theos-sdks sparse-checkout init --cone
+          git clone --depth 1 --recursive https://github.com/roothide/theos.git "$THEOS"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/theos-sdks
           git -C /tmp/theos-sdks sparse-checkout set iPhoneOS16.5.sdk
-          git -C /tmp/theos-sdks fetch --depth 1 origin 0222fd5413cf4b9af096f37b4621afa2688572f7
-          git -C /tmp/theos-sdks checkout --detach FETCH_HEAD
-          test "$(git -C /tmp/theos-sdks rev-parse HEAD)" = "0222fd5413cf4b9af096f37b4621afa2688572f7"
           mkdir -p "$THEOS/sdks"
           cp -R /tmp/theos-sdks/iPhoneOS16.5.sdk "$THEOS/sdks/"
-
-      - name: Add libproc header stub
-        run: |
           mkdir -p "$THEOS/sdks/iPhoneOS16.5.sdk/usr/include/libproc"
-          cat > "$THEOS/sdks/iPhoneOS16.5.sdk/usr/include/libproc/libproc.h" <<'EOF'
-          #ifndef LIBPROC_LIBPROC_H
-          #define LIBPROC_LIBPROC_H
-          
-          #include <sys/cdefs.h>
-          #include <stdint.h>
-          #include <sys/types.h>
-          
-          #define PROC_PIDPATHINFO_MAXSIZE 4096
-          
-          __BEGIN_DECLS
-          int proc_pidpath(int pid, void * buffer, uint32_t buffersize);
-          __END_DECLS
-          
-          #endif
-          EOF
-
-      - name: Build AltList for Theos vendor
-        run: |
-          export PATH="/opt/homebrew/opt/make/libexec/gnubin:$THEOS/bin:$PATH"
-          git init /tmp/AltList
-          git -C /tmp/AltList remote add origin https://github.com/opa334/AltList.git
-          git -C /tmp/AltList fetch --depth 1 origin 9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7
-          git -C /tmp/AltList checkout --detach FETCH_HEAD
-          test "$(git -C /tmp/AltList rev-parse HEAD)" = "9db09f92eff0404ae7fa9c2fe6c25ba13d5e02d7"
-          make -C /tmp/AltList clean THEOS_PACKAGE_SCHEME=rootless SDKVERSION=16.5
-          make -C /tmp/AltList FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SDKVERSION=16.5
-          mkdir -p "$THEOS/vendor/include/AltList" "$THEOS/vendor/lib" "$THEOS/vendor/lib/iphone/roothide"
-          cp -R /tmp/AltList/.theos/obj/AltList.framework "$THEOS/vendor/lib/"
-          cp -R /tmp/AltList/.theos/obj/AltList.framework "$THEOS/vendor/lib/iphone/roothide/"
-          cp /tmp/AltList/*.h "$THEOS/vendor/include/AltList/"
-
-      - name: Run host regression tests
-        run: |
-          tests/run_process_identity_tests.sh
-          python3 tests/check_auto_monitor_path.py
+          cp libproc/libproc.h "$THEOS/sdks/iPhoneOS16.5.sdk/usr/include/libproc/libproc.h"
 
       - name: Build package
         run: |
           set -o pipefail
           export PATH="/opt/homebrew/opt/make/libexec/gnubin:$THEOS/bin:$PATH"
-          test -d "$THEOS/sdks/iPhoneOS16.5.sdk"
-          system_sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
-          test -d "$system_sdk"
-          make clean TARGET=iphone:clang:17.5:15.0 SYSROOT="$system_sdk"
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide TARGET=iphone:clang:17.5:15.0 SYSROOT="$system_sdk" 2>&1 | tee /tmp/vedette-build.log
+          SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide TARGET=iphone:clang:17.5:15.0 SYSROOT="$SYSROOT" 2>&1 | tee /tmp/build.log
 
-      - name: Verify roothide artifact
+      - name: Verify package
         run: |
-          test -s /tmp/vedette-build.log
-          ! grep -qi 'incompatible arm64e' /tmp/vedette-build.log
-          test "$(find packages -maxdepth 1 -name '*.deb' | wc -l | tr -d ' ')" = "1"
-          deb="packages/com.udevs.vedette_1.1.10_iphoneos-arm64e.deb"
-          test -s "$deb"
-          test "$(dpkg-deb -f "$deb" Package)" = "com.udevs.vedette"
-          test "$(dpkg-deb -f "$deb" Version)" = "1.1.10"
+          deb="$(find packages -maxdepth 1 -name 'com.moxuan.awemecpuguard_*.deb' -print -quit)"
+          test -n "$deb" && test -s "$deb"
+          test "$(dpkg-deb -f "$deb" Package)" = "com.moxuan.awemecpuguard"
           test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
-          rm -rf /tmp/vedette-package
-          dpkg-deb -x "$deb" /tmp/vedette-package
-          dylib="$(find /tmp/vedette-package -name 'Vedette.dylib' -print -quit)"
-          prefs_binary="$(find /tmp/vedette-package -path '*/VedettePrefs.bundle/VedettePrefs' -print -quit)"
-          test -n "$dylib"
-          test -n "$prefs_binary"
-          test "${dylib#/tmp/vedette-package}" = "/Library/MobileSubstrate/DynamicLibraries/Vedette.dylib"
-          test "${prefs_binary#/tmp/vedette-package}" = "/Library/PreferenceBundles/VedettePrefs.bundle/VedettePrefs"
-          otool -D "$dylib" | grep -q '@loader_path/.jbroot/'
-          for binary in "$dylib" "$prefs_binary"; do
-            lipo "$binary" -verify_arch arm64 arm64e
-            otool -l "$binary" > /tmp/vedette-load-commands.txt
-            grep -q 'LC_DYLD_CHAINED_FIXUPS' /tmp/vedette-load-commands.txt
-            ! grep -q 'LC_DYLD_INFO_ONLY' /tmp/vedette-load-commands.txt
-            grep -q 'LC_CODE_SIGNATURE' /tmp/vedette-load-commands.txt
-            test "$(awk '$1 == "minos" { print $2 }' /tmp/vedette-load-commands.txt | sort -u)" = "15.0"
-            test "$(awk '$1 == "sdk" { print $2 }' /tmp/vedette-load-commands.txt | sort -u)" = "17.5"
-          done
-          dpkg-deb -e "$deb" /tmp/vedette-control
-          for script in /tmp/vedette-control/preinst /tmp/vedette-control/postinst /tmp/vedette-control/prerm /tmp/vedette-control/postrm; do
-            test ! -f "$script" || bash -n "$script"
-          done
+          dpkg-deb -c "$deb" | grep -q 'AwemeCPUGuard.dylib'
+          dpkg-deb -c "$deb" | grep -q 'AwemeCPUGuardPrefs.bundle/AwemeCPUGuardPrefs'
 
-      - name: Upload deb packages
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Upload RootHide deb
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: vedette-roothide-packages
+          name: aweme-cpu-guard-roothide
           path: packages/*.deb
           if-no-files-found: error

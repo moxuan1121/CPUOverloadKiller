@@ -1,23 +1,25 @@
-# Vedette
- Monitor and terminate/throttle CPU hogging processes in iOS
+# AwemeCPUGuard
 
-Vedette is a CPU usage monitoring tweak for processes in iOS like apps and daemons, and terminate/throttle it when they violate the maximum allowed percentage. 
+RootHide 越狱插件：只监控抖音国际/中国版的目标 Bundle ID `com.ss.iphone.ugc.Aweme`。
 
-One example is the *trustd* issue that's happening on both macOS and iOS. More info on this issue can be found on this excellent article written by Jeff Johnson
-[here](https://lapcatsoftware.com/articles/trustd.html).
+## 行为
 
-## Compatibility
-This package tested to be working on iOS 14.3. Might or might not work on other iOS version. Though, I *think* it should work on iOS 10 and above due to the low level API used are supported since iOS 10.
+每秒读取目标进程所有线程累计的 user + system CPU 时间，计算整个进程的 CPU 使用率。
 
-## Bonus
-Vedette is NOT cabaret as how Google's first search result show, and definately not the hot girl shown.
+当总 CPU **连续**高于手动设定的阈值达到设定秒数时，插件会再次确认 PID 仍属于 Aweme，再发送 `SIGKILL`。CPU 回落至阈值或以下时，连续计时立即清零。
 
-## Credits
-- opa334 - for daemons list population in preferences, taken from 
-[Choicy](https://github.com/opa334/Choicy)
-- Freepik - Vedette vector
+## 设置
 
-## License
-All source code in this repository are licensed under GPLv3, unless stated otherwise.
+- 启用 CPU 保护
+- 总 CPU 上限：1–100%，默认 80%
+- 连续超标：1–3600 秒，默认 10 秒
 
-Copyright (c) 2021 udevs
+没有其它目标选择、AltList 依赖、Throttle 或旧版 per-thread CPU monitor 模式。
+
+## 构建
+
+GitHub Actions 的 macOS-14 工作流构建并验证 RootHide `iphoneos-arm64e` `.deb`，构建产物以 Actions artifact 上传。
+
+## 来源与许可
+
+此项目以 [doimty/vedette](https://github.com/doimty/vedette) 为基础重写精简，遵守其 GPLv3 许可证。
