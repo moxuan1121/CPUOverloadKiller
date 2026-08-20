@@ -45,7 +45,7 @@ static BOOL aweme_pid_is_current(pid_t pid) {
 static pid_t find_aweme_pid(void) {
     int byteCount = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
     if (byteCount <= 0) return 0;
-    int *pids = calloc(1, (size_t)byteCount);
+    int *pids = (int *)calloc(1, (size_t)byteCount);
     if (!pids) return 0;
     int returned = proc_listpids(PROC_ALL_PIDS, 0, pids, byteCount);
     pid_t result = 0;
@@ -61,7 +61,7 @@ static pid_t find_aweme_pid(void) {
 
 static BOOL read_total_cpu_nanoseconds(pid_t pid, uint64_t *outCPU) {
     if (!outCPU || pid <= 0) return NO;
-    aweme_rusage_info_v0 usage = {0};
+    aweme_rusage_info_v0 usage = {};
     if (proc_pid_rusage(pid, RUSAGE_INFO_V0, &usage) != 0) return NO;
     *outCPU = usage.userTime + usage.systemTime;
     return YES;

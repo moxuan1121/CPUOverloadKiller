@@ -14,6 +14,16 @@ static inline NSString *VDTPrefsPath(void) {
     return path;
 }
 
+static inline NSString *VDTPrefsPathTmp(void) {
+    static NSString *path;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        path = jbroot(@"/var/tmp/com.moxuan.awemecpuguard.plist");
+    });
+    return path;
+}
+
 #define PREFS_PATH VDTPrefsPath()
+#define PREFS_PATH_TMP VDTPrefsPathTmp()
 #define PREFS_CHANGED_NN @"com.moxuan.awemecpuguard.prefschanged"
 #define VDT_JBROOT_PATH(path) jbroot(@(path))
