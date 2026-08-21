@@ -7,7 +7,7 @@
 #import <objc/message.h>
 
 static UIImage *GCGIcon(NSString *identifier){SEL selector=NSSelectorFromString(@"_applicationIconImageForBundleIdentifier:format:scale:");if(![UIImage respondsToSelector:selector])return nil;typedef UIImage *(*Fn)(id,SEL,NSString*,NSInteger,CGFloat);return ((Fn)objc_msgSend)(UIImage.class,selector,identifier,2,UIScreen.mainScreen.scale);}
-static NSString *GCGAppName(NSString *identifier){LSApplicationProxy *proxy=[LSApplicationProxy applicationProxyForIdentifier:identifier];NSBundle *bundle=proxy.bundleURL?[NSBundle bundleWithURL:proxy.bundleURL]:nil;return [bundle objectForInfoDictionaryKey:@"CFBundleDisplayName"]?:[bundle objectForInfoDictionaryKey:@"CFBundleName"]?:identifier;}
+static NSString *GCGAppName(NSString *identifier){Class proxyClass=NSClassFromString(@"LSApplicationProxy");id proxy=[proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)]?[proxyClass applicationProxyForIdentifier:identifier]:nil;NSURL *bundleURL=[proxy respondsToSelector:@selector(bundleURL)]?[proxy bundleURL]:nil;NSBundle *bundle=bundleURL?[NSBundle bundleWithURL:bundleURL]:nil;return [bundle objectForInfoDictionaryKey:@"CFBundleDisplayName"]?:[bundle objectForInfoDictionaryKey:@"CFBundleName"]?:identifier;}
 
 @implementation VDTRootListController
 - (NSArray *)specifiers {
