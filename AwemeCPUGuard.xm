@@ -8,6 +8,7 @@
 #include <mach/mach_time.h>
 #include <notify.h>
 #include <signal.h>
+#include <atomic>
 #include <time.h>
 
 static NSString * const kAwemeBundleIdentifier = @"com.ss.iphone.ugc.Aweme";
@@ -18,6 +19,7 @@ static const uint64_t kExceededSampleNanoseconds = NSEC_PER_MSEC * 500ULL;
 static dispatch_source_t gMonitorTimer;
 static dispatch_queue_t gMonitorQueue;
 static int gPreferencesNotificationToken = -1;
+static std::atomic_bool gAwemeIsFrontmost(false);
 
 @interface SpringBoard : UIApplication
 - (id)_accessibilityFrontMostApplication;
@@ -37,7 +39,10 @@ static void schedule_next_check(uint64_t delayNanoseconds) {
         NSEC_PER_MSEC * 50ULL);
 }
 
-static BOOL aweme_is_frontmost(void) {
+static BOOL read_aweme_frontmost_on_main_thread(void) {
+    // SpringBoard's accessibility frontmost lookup enters SceneManager and
+    // must never be called from the CPU monitor queue on iOS 15.
+    if (![NSThread isMainThread]) return NO;
     UIApplication *springBoard = [UIApplication sharedApplication];
     if (![springBoard respondsToSelector:@selector(_accessibilityFrontMostApplication)]) return NO;
     id application = [(SpringBoard *)springBoard _accessibilityFrontMostApplication];
@@ -197,7 +202,7 @@ static uint64_t run_aweme_cpu_guard(void) {
         return DISPATCH_TIME_FOREVER;
     }
 
-    if (!aweme_is_frontmost()) {
+    if (!gAwemeIsFrontmost.load(std::memory_order_acquire)) {
         // Background time must never contribute to either the CPU baseline or
         // the continuous-over-limit duration. No target CPU syscall is made.
         trackedPID = 0;
@@ -281,7 +286,7 @@ static uint64_t run_aweme_cpu_guard(void) {
         double exceededSeconds = (double)exceededNanoseconds / (double)kNanosecondsPerSecond;
         publish_status(AwemeCPUGuardStatusThresholdExceeded, totalCPUPercent, threshold, exceededSeconds);
         if (exceededNanoseconds >= (uint64_t)duration * kNanosecondsPerSecond &&
-            aweme_is_frontmost() &&
+            gAwemeIsFrontmost.load(std::memory_order_acquire) &&
             aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
             HBLogInfo(@"AwemeCPUGuard: SIGKILL pid %d; total CPU %.1f%% reached %d%% for %d seconds", trackedPID, totalCPUPercent, threshold, duration);
             errno = 0;
@@ -313,6 +318,8 @@ static uint64_t run_aweme_cpu_guard(void) {
 
 - (void)frontDisplayDidChange:(id)newDisplay {
     %orig;
+    BOOL isFrontmost = read_aweme_frontmost_on_main_thread();
+    gAwemeIsFrontmost.store(isFrontmost, std::memory_order_release);
     if (gMonitorQueue) {
         dispatch_async(gMonitorQueue, ^{
             // Wake immediately on foreground/background transitions; the
@@ -328,6 +335,7 @@ static uint64_t run_aweme_cpu_guard(void) {
     @autoreleasepool {
         if (![[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) return;
         dispatch_async(dispatch_get_main_queue(), ^{
+            gAwemeIsFrontmost.store(read_aweme_frontmost_on_main_thread(), std::memory_order_release);
             gMonitorQueue = dispatch_queue_create("com.moxuan.awemecpuguard.monitor", DISPATCH_QUEUE_SERIAL);
             gMonitorTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gMonitorQueue);
             dispatch_source_set_event_handler(gMonitorTimer, ^{
