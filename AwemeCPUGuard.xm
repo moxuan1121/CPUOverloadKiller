@@ -1,5 +1,6 @@
 #import "Common.h"
 #import "VDTShared.h"
+#import <UIKit/UIKit.h>
 
 #include <libproc/libproc.h>
 #include <libproc/libproc_internal.h>
@@ -336,7 +337,7 @@ static uint64_t run_aweme_cpu_guard(void) {
             });
             schedule_next_check(NSEC_PER_SEC);
             dispatch_resume(gMonitorTimer);
-            notify_register_dispatch(PREFS_CHANGED_NN, &gPreferencesNotificationToken, gMonitorQueue, ^(int token) {
+            notify_register_dispatch([PREFS_CHANGED_NN UTF8String], &gPreferencesNotificationToken, gMonitorQueue, ^(int token) {
                 schedule_next_check(NSEC_PER_MSEC * 100ULL);
             });
             publish_status(AwemeCPUGuardStatusWaitingForProcess, 0, 0, 0);

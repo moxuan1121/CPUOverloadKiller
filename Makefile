@@ -15,6 +15,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = AwemeCPUGuard
 AwemeCPUGuard_FILES = AwemeCPUGuard.xm VDTShared.mm
 AwemeCPUGuard_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)
+AwemeCPUGuard_FRAMEWORKS = UIKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 SUBPROJECTS += vedetteprefs
