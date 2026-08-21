@@ -4,6 +4,7 @@
 #include <libproc/libproc.h>
 #include <libproc/libproc_internal.h>
 #include <errno.h>
+#include <mach/mach_time.h>
 #include <notify.h>
 #include <signal.h>
 #include <time.h>
@@ -66,6 +67,19 @@ static BOOL aweme_pid_is_current(pid_t pid) {
     NSString *bundleIdentifier = [info[@"CFBundleIdentifier"] isKindOfClass:[NSString class]]
         ? info[@"CFBundleIdentifier"] : nil;
     return [bundleIdentifier isEqualToString:kAwemeBundleIdentifier];
+}
+
+static double mach_ticks_to_nanoseconds(uint64_t ticks) {
+    static mach_timebase_info_data_t timebase = {0};
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+            timebase.numer == 0 || timebase.denom == 0) {
+            timebase.numer = 1;
+            timebase.denom = 1;
+        }
+    });
+    return ((double)ticks * (double)timebase.numer) / (double)timebase.denom;
 }
 
 static BOOL read_aweme_identity(pid_t pid, NSString **outPath, uint64_t *outStartTime) {
@@ -194,7 +208,11 @@ static void run_aweme_cpu_guard(void) {
 
     uint64_t cpuDelta = currentCPU - previousCPU;
     uint64_t wallDelta = currentWall - previousWall;
-    double totalCPUPercent = ((double)cpuDelta * 100.0) / (double)wallDelta;
+    // ri_user_time and ri_system_time are Mach absolute-time units, while
+    // CLOCK_MONOTONIC is represented here in nanoseconds. Convert the CPU
+    // delta using the device timebase before comparing percentages.
+    double cpuDeltaNanoseconds = mach_ticks_to_nanoseconds(cpuDelta);
+    double totalCPUPercent = (cpuDeltaNanoseconds * 100.0) / (double)wallDelta;
     previousCPU = currentCPU;
     previousWall = currentWall;
 

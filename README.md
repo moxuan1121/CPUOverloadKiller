@@ -12,6 +12,8 @@ RootHide 越狱插件：只监控抖音国际/中国版的目标 Bundle ID `com.
 
 偏好文件使用共享的 `/var/mobile/Library/Preferences` 数据路径，不对该路径调用 `jbroot()`；状态页会显示监控器实际测得的 CPU 和实际生效阈值。
 
+`proc_pid_rusage()`返回的用户态和内核态CPU时间按设备的Mach timebase转换成纳秒后再计算百分比，不使用固定倍率修正。
+
 ## 设置
 
 - 启用 CPU 保护
