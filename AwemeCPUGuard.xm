@@ -11,7 +11,38 @@
 
 static NSString * const kAwemeBundleIdentifier = @"com.ss.iphone.ugc.Aweme";
 static const uint64_t kNanosecondsPerSecond = 1000000000ULL;
+static const uint64_t kIdleSampleNanoseconds = 60ULL * NSEC_PER_SEC;
+static const uint64_t kNearThresholdSampleNanoseconds = 1ULL * NSEC_PER_SEC;
+static const uint64_t kExceededSampleNanoseconds = NSEC_PER_MSEC * 500ULL;
 static dispatch_source_t gMonitorTimer;
+static dispatch_queue_t gMonitorQueue;
+static int gPreferencesNotificationToken = -1;
+
+@interface SpringBoard : UIApplication
+- (id)_accessibilityFrontMostApplication;
+@end
+
+@interface NSObject (AwemeCPUGuardApplicationIdentity)
+- (NSString *)bundleIdentifier;
+@end
+
+static void schedule_next_check(uint64_t delayNanoseconds) {
+    if (!gMonitorTimer) return;
+    dispatch_source_set_timer(gMonitorTimer,
+        delayNanoseconds == DISPATCH_TIME_FOREVER
+            ? DISPATCH_TIME_FOREVER
+            : dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNanoseconds),
+        DISPATCH_TIME_FOREVER,
+        NSEC_PER_MSEC * 50ULL);
+}
+
+static BOOL aweme_is_frontmost(void) {
+    UIApplication *springBoard = [UIApplication sharedApplication];
+    if (![springBoard respondsToSelector:@selector(_accessibilityFrontMostApplication)]) return NO;
+    id application = [(SpringBoard *)springBoard _accessibilityFrontMostApplication];
+    if (![application respondsToSelector:@selector(bundleIdentifier)]) return NO;
+    return [[application bundleIdentifier] isEqualToString:kAwemeBundleIdentifier];
+}
 
 static void publish_status(AwemeCPUGuardStatus status, double cpuPercent,
                            NSUInteger threshold, double exceededSeconds) {
@@ -140,13 +171,14 @@ static int validated_integer(id value, int fallback, int lower, int upper) {
     return (int)parsed;
 }
 
-static void run_aweme_cpu_guard(void) {
+static uint64_t run_aweme_cpu_guard(void) {
     static pid_t trackedPID = 0;
     static NSString *trackedPath = nil;
     static uint64_t trackedStartTime = 0;
     static uint64_t previousCPU = 0;
     static uint64_t previousWall = 0;
     static uint64_t exceededNanoseconds = 0;
+    static BOOL wasExceeding = NO;
 
     NSDictionary *prefs = getPrefs() ?: @{};
     BOOL enabled = prefs[@"enabled"] ? [prefs[@"enabled"] boolValue] : YES;
@@ -159,8 +191,23 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededNanoseconds = 0;
+        wasExceeding = NO;
         publish_status(AwemeCPUGuardStatusDisabled, 0, threshold, 0);
-        return;
+        return DISPATCH_TIME_FOREVER;
+    }
+
+    if (!aweme_is_frontmost()) {
+        // Background time must never contribute to either the CPU baseline or
+        // the continuous-over-limit duration. No target CPU syscall is made.
+        trackedPID = 0;
+        trackedPath = nil;
+        trackedStartTime = 0;
+        previousCPU = 0;
+        previousWall = 0;
+        exceededNanoseconds = 0;
+        wasExceeding = NO;
+        publish_status(AwemeCPUGuardStatusWaitingForForeground, 0, threshold, 0);
+        return kIdleSampleNanoseconds;
     }
 
     if (trackedPID <= 0 || !aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
@@ -170,6 +217,7 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededNanoseconds = 0;
+        wasExceeding = NO;
         NSString *newPath = nil;
         uint64_t newStartTime = 0;
         if (trackedPID > 0 && read_aweme_identity(trackedPID, &newPath, &newStartTime)) {
@@ -184,7 +232,9 @@ static void run_aweme_cpu_guard(void) {
     }
     if (trackedPID <= 0) {
         publish_status(AwemeCPUGuardStatusWaitingForProcess, 0, threshold, 0);
-        return;
+        // No CPU sampling occurs while Aweme is absent. This low-frequency
+        // discovery pass preserves automatic monitoring after a relaunch.
+        return kIdleSampleNanoseconds;
     }
 
     uint64_t currentCPU = 0;
@@ -196,14 +246,15 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededNanoseconds = 0;
+        wasExceeding = NO;
         publish_status(AwemeCPUGuardStatusCPUReadFailed, 0, threshold, 0);
-        return;
+        return kIdleSampleNanoseconds;
     }
     if (previousWall == 0 || currentWall <= previousWall || currentCPU < previousCPU) {
         previousCPU = currentCPU;
         previousWall = currentWall;
         publish_status(AwemeCPUGuardStatusMonitoring, 0, threshold, 0);
-        return;
+        return kNearThresholdSampleNanoseconds;
     }
 
     uint64_t cpuDelta = currentCPU - previousCPU;
@@ -217,10 +268,19 @@ static void run_aweme_cpu_guard(void) {
     previousWall = currentWall;
 
     if (totalCPUPercent >= threshold) {
-        exceededNanoseconds += wallDelta;
+        // A long idle sample can only establish that CPU is high now; it
+        // cannot prove that the whole preceding 60-second gap was above the
+        // limit. Start continuous timing here, then verify every 500 ms.
+        if (wasExceeding) {
+            exceededNanoseconds += wallDelta;
+        } else {
+            exceededNanoseconds = 0;
+            wasExceeding = YES;
+        }
         double exceededSeconds = (double)exceededNanoseconds / (double)kNanosecondsPerSecond;
         publish_status(AwemeCPUGuardStatusThresholdExceeded, totalCPUPercent, threshold, exceededSeconds);
         if (exceededNanoseconds >= (uint64_t)duration * kNanosecondsPerSecond &&
+            aweme_is_frontmost() &&
             aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
             HBLogInfo(@"AwemeCPUGuard: SIGKILL pid %d; total CPU %.1f%% reached %d%% for %d seconds", trackedPID, totalCPUPercent, threshold, duration);
             errno = 0;
@@ -233,22 +293,52 @@ static void run_aweme_cpu_guard(void) {
             exceededNanoseconds = 0;
             previousCPU = 0;
             previousWall = 0;
+            wasExceeding = NO;
+            return kIdleSampleNanoseconds;
         }
+        return kExceededSampleNanoseconds;
     } else {
         exceededNanoseconds = 0;
+        wasExceeding = NO;
         publish_status(AwemeCPUGuardStatusMonitoring, totalCPUPercent, threshold, 0);
+        return totalCPUPercent >= ((double)threshold * 0.5)
+            ? kNearThresholdSampleNanoseconds
+            : kIdleSampleNanoseconds;
     }
 }
+
+
+%hook SpringBoard
+
+- (void)frontDisplayDidChange:(id)newDisplay {
+    %orig;
+    if (gMonitorQueue) {
+        dispatch_async(gMonitorQueue, ^{
+            // Wake immediately on foreground/background transitions; the
+            // guard itself remains the authority for the current frontmost ID.
+            schedule_next_check(NSEC_PER_MSEC * 100ULL);
+        });
+    }
+}
+
+%end
 
 %ctor {
     @autoreleasepool {
         if (![[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) return;
         dispatch_async(dispatch_get_main_queue(), ^{
-            dispatch_queue_t queue = dispatch_queue_create("com.moxuan.awemecpuguard.monitor", DISPATCH_QUEUE_SERIAL);
-            gMonitorTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-            dispatch_source_set_timer(gMonitorTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_MSEC * 100);
-            dispatch_source_set_event_handler(gMonitorTimer, ^{ @autoreleasepool { run_aweme_cpu_guard(); } });
+            gMonitorQueue = dispatch_queue_create("com.moxuan.awemecpuguard.monitor", DISPATCH_QUEUE_SERIAL);
+            gMonitorTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gMonitorQueue);
+            dispatch_source_set_event_handler(gMonitorTimer, ^{
+                @autoreleasepool {
+                    schedule_next_check(run_aweme_cpu_guard());
+                }
+            });
+            schedule_next_check(NSEC_PER_SEC);
             dispatch_resume(gMonitorTimer);
+            notify_register_dispatch(PREFS_CHANGED_NN, &gPreferencesNotificationToken, gMonitorQueue, ^(int token) {
+                schedule_next_check(NSEC_PER_MSEC * 100ULL);
+            });
             publish_status(AwemeCPUGuardStatusWaitingForProcess, 0, 0, 0);
             HBLogInfo(@"AwemeCPUGuard: total CPU monitor started in SpringBoard");
         });

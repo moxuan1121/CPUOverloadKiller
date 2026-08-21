@@ -69,6 +69,7 @@
         case AwemeCPUGuardStatusKilled:
             return [NSString stringWithFormat:@"已终止抖音：%.1f%%", cpu];
         case AwemeCPUGuardStatusCPUReadFailed: return @"CPU 读取失败";
+        case AwemeCPUGuardStatusWaitingForForeground: return @"等待抖音进入前台";
         case AwemeCPUGuardStatusKillFailed:
             return [NSString stringWithFormat:@"终止失败：%.1f%%", cpu];
         default: return @"插件未在 SpringBoard 中运行";

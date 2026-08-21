@@ -31,6 +31,7 @@ typedef NS_ENUM(uint64_t, AwemeCPUGuardStatus) {
     AwemeCPUGuardStatusKilled = 5,
     AwemeCPUGuardStatusCPUReadFailed = 6,
     AwemeCPUGuardStatusKillFailed = 7,
+    AwemeCPUGuardStatusWaitingForForeground = 8,
 };
 
 static inline uint64_t AwemeCPUGuardEncodeStatus(AwemeCPUGuardStatus status,
