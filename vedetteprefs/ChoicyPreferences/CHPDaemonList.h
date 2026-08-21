@@ -36,6 +36,5 @@
 - (BOOL)daemonList:(NSArray*)daemonList containsDisplayName:(NSString*)displayName;
 - (void)updateDaemonListIfNeeded;
 - (void)addObserver:(id<CHPDaemonListObserver>)observer;
-- (void)removeObserver:(id<CHPDaemonListObserver>)observer;
 - (void)sendReloadToObservers;
 @end

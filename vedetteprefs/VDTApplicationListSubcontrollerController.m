@@ -30,9 +30,6 @@ static NSString *VDTDisplayName(LSApplicationProxy *proxy){
     });
 }
 
-- (NSString *)topTitle{ return @"应用程序"; }
-- (NSString *)plistName{ return nil; }
-
 - (NSMutableArray *)specifiers{
     if (!_specifiers){
         NSMutableArray *result = [NSMutableArray array];
@@ -54,7 +51,7 @@ static NSString *VDTDisplayName(LSApplicationProxy *proxy){
         }
         _specifiers = result;
     }
-    self.navigationItem.title = [self topTitle];
+    self.navigationItem.title = @"应用程序";
     return _specifiers;
 }
 

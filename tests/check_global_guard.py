@@ -6,13 +6,14 @@ common = (root / "Common.h").read_text(encoding="utf-8")
 config = (root / "vedetteprefs/VDTProcessConfiguration.m").read_text(encoding="utf-8")
 app_list = (root / "vedetteprefs/VDTApplicationListSubcontrollerController.m").read_text(encoding="utf-8")
 daemon_list = (root / "vedetteprefs/ChoicyPreferences/CHPDaemonListController.m").read_text(encoding="utf-8")
+daemon_source = (root / "vedetteprefs/ChoicyPreferences/CHPDaemonList.m").read_text(encoding="utf-8")
 root_list = (root / "vedetteprefs/VDTRootListController.m").read_text(encoding="utf-8")
 target_cell = (root / "vedetteprefs/GCGTargetCell.m").read_text(encoding="utf-8")
 
 required_core = [
     "proc_pid_rusage", "mach_timebase_info", "DISPATCH_SOURCE_TYPE_PROC",
     "DISPATCH_PROC_EXIT", "dispatch_source_set_timer", "DISPATCH_TIME_FOREVER",
-    "monitorInBackground", "frontmostID", "identity(s)", "kill(s.pid,SIGKILL)",
+    "monitorInBackground", "frontmostID", "same_instance(s)", "identity(s)", "kill(s.pid,SIGKILL)",
     "processStartAbsoluteTime", "expectedPath", "bundle_for_path", "statusToken",
 ]
 for item in required_core:
@@ -34,6 +35,12 @@ assert 'setValueForProcessConfigKey(identifier,@"enabled",@YES' in daemon_list
 assert "commitEditingStyle" in root_list and '@"enabled",@NO' in root_list
 assert "notify_cancel(token)" not in core
 assert "AwemeCPUGuardStatusWaitingForForeground" in core
+for item in ["configsDirty", "park_timer", "discoveryDelay", "reset_discovery"]:
+    assert item in core, f"missing low-energy invariant: {item}"
+assert "notify_post(name.UTF8String)" not in core
+assert "System/Library/PrivateFrameworks" not in daemon_source
+assert 'opendir("/usr/libexec")' not in daemon_source
+assert "linkedFrameworkIdentifiers" not in daemon_source + daemon_list
 assert "添加进程" in root_list and "UIAlertControllerStyleActionSheet" in root_list
 assert "GCGIconPointSize = 28.0" in target_cell
 for scale_name in ["GlobalCPUGuard.png", "GlobalCPUGuard@2x.png", "GlobalCPUGuard@3x.png"]:

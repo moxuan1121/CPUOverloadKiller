@@ -14,6 +14,8 @@ static dispatch_source_t timer;
 static int prefsToken = -1;
 static NSString *frontmostID;
 static uint64_t nextDiscovery;
+static uint64_t discoveryDelay = 5ULL * 1000000000ULL;
+static BOOL configsDirty = YES;
 
 @interface SpringBoard : UIApplication
 - (id)_accessibilityFrontMostApplication;
@@ -45,6 +47,7 @@ processStartAbsoluteTime, processExitAbsoluteTime; } gcg_rusage_info_v0;
 @end
 static NSMutableDictionary<NSString *, GCGState *> *states;
 static void schedule(uint64_t delay);
+static void reset_discovery(void){nextDiscovery=0;discoveryDelay=5*NSSEC;}
 
 static uint64_t now_ns(void) { struct timespec t={0}; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*NSSEC+t.tv_nsec; }
 static double ticks_ns(uint64_t ticks) {
@@ -71,15 +74,17 @@ static void publish(GCGState *s,AwemeCPUGuardStatus status,double cpu,double exc
     NSString *name=GCGStatusNotificationName(s.type,s.identifier);
     if(s.statusToken<0){int token=-1;if(notify_register_check(name.UTF8String,&token)!=NOTIFY_STATUS_OK)return;s.statusToken=token;}
     notify_set_state(s.statusToken,AwemeCPUGuardEncodeStatus(status,(NSUInteger)MAX(0,MIN(cpu*10,16777215)),s.threshold,(NSUInteger)MAX(0,MIN(exceeded*10,65535))));
-    notify_post(name.UTF8String);
 }
 static void clear_state(GCGState *s) { if(s.exitSource){dispatch_source_cancel(s.exitSource);s.exitSource=nil;}s.pid=0;s.path=nil;s.start=0;s.oldCPU=0;s.oldWall=0;s.exceeded=0;s.exceeding=NO;s.due=0; }
 static void bind_state(GCGState *s,pid_t pid,NSString *path,uint64_t start,uint64_t now){s.pid=pid;s.path=path;s.start=start;s.due=now;
     dispatch_source_t source=dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC,(uintptr_t)pid,DISPATCH_PROC_EXIT,queue);s.exitSource=source;
-    dispatch_source_set_event_handler(source,^{if(s.pid==pid){clear_state(s);publish(s,AwemeCPUGuardStatusWaitingForProcess,0,0);nextDiscovery=0;schedule(NSEC_PER_MSEC*100);}});dispatch_resume(source);}
-static BOOL identity(GCGState *s) {
+    dispatch_source_set_event_handler(source,^{if(s.pid==pid){clear_state(s);publish(s,AwemeCPUGuardStatusWaitingForProcess,0,0);reset_discovery();schedule(NSEC_PER_MSEC*100);}});dispatch_resume(source);}
+static BOOL same_instance(GCGState *s) {
     NSString *path=pid_path(s.pid);uint64_t start=0;
-    if(!path.length||![path isEqual:s.path]||!usage(s.pid,NULL,&start)||start!=s.start)return NO;
+    return path.length&&[path isEqual:s.path]&&usage(s.pid,NULL,&start)&&start==s.start;
+}
+static BOOL identity(GCGState *s) {
+    if(!same_instance(s))return NO;NSString *path=s.path;
     return s.type==VDTConfigTypeApp?[(bundle_for_path(path)?:@"") isEqualToString:s.identifier]:
         ([(pid_name(s.pid)?:@"") isEqualToString:s.identifier]&&(!s.expectedPath.length||[path isEqualToString:s.expectedPath]));
 }
@@ -97,14 +102,16 @@ static void sync_configs(void) {
     for(NSString *key in states.allKeys.copy)if(![keep containsObject:key]){GCGState *s=states[key];publish(s,AwemeCPUGuardStatusDisabled,0,0);clear_state(s);[states removeObjectForKey:key];}
 }
 static void discover(uint64_t now) {
-    BOOL missing=NO;for(GCGState *s in states.allValues)if(!s.pid&&(s.type==VDTConfigTypeDaemon||s.background||[frontmostID isEqual:s.identifier])){missing=YES;break;}if(!missing||now<nextDiscovery)return;nextDiscovery=now+5*NSSEC;
+    BOOL missing=NO;for(GCGState *s in states.allValues)if(!s.pid&&(s.type==VDTConfigTypeDaemon||s.background||[frontmostID isEqual:s.identifier])){missing=YES;break;}if(!missing||now<nextDiscovery)return;
+    nextDiscovery=now+discoveryDelay;BOOL bound=NO;
     int bytes=proc_listpids(PROC_ALL_PIDS,0,NULL,0);if(bytes<=0)return;int *pids=(int *)calloc(1,(size_t)bytes);if(!pids)return;int count=proc_listpids(PROC_ALL_PIDS,0,pids,bytes)/(int)sizeof(int);
     for(int i=0;i<count;i++){pid_t pid=pids[i];NSString *path=pid_path(pid);if(!path.length)continue;NSString *name=nil,*bundle=nil;
         for(GCGState *s in states.allValues){if(s.pid||(s.type==VDTConfigTypeApp&&!s.background&&![frontmostID isEqual:s.identifier]))continue;BOOL match=NO;if(s.type==VDTConfigTypeDaemon){if(!name)name=pid_name(pid);match=[name isEqual:s.identifier]&&(!s.expectedPath.length||[path isEqual:s.expectedPath]);}else{if(!bundle)bundle=bundle_for_path(path);match=[bundle isEqual:s.identifier];}
-            uint64_t start=0;if(match&&usage(pid,NULL,&start)){bind_state(s,pid,path,start,now);publish(s,AwemeCPUGuardStatusMonitoring,0,0);}}}free(pids);
+            uint64_t start=0;if(match&&usage(pid,NULL,&start)){bind_state(s,pid,path,start,now);publish(s,AwemeCPUGuardStatusMonitoring,0,0);bound=YES;}}}free(pids);
+    discoveryDelay=bound?5*NSSEC:MIN(discoveryDelay*2,60*NSSEC);
 }
 static void sample(GCGState *s,uint64_t now) {
-    if(!identity(s)){clear_state(s);publish(s,AwemeCPUGuardStatusWaitingForProcess,0,0);return;}
+    if(!same_instance(s)){clear_state(s);publish(s,AwemeCPUGuardStatusWaitingForProcess,0,0);return;}
     if(!allowed(s)){s.oldCPU=s.oldWall=s.exceeded=0;s.exceeding=NO;s.due=now+s.idle*NSSEC;publish(s,AwemeCPUGuardStatusWaitingForForeground,0,0);return;}
     uint64_t cpu=0;if(!usage(s.pid,&cpu,NULL)){clear_state(s);publish(s,AwemeCPUGuardStatusCPUReadFailed,0,0);return;}
     if(!s.oldWall||now<=s.oldWall||cpu<s.oldCPU){s.oldCPU=cpu;s.oldWall=now;s.due=now+NSSEC;publish(s,AwemeCPUGuardStatusMonitoring,0,0);return;}
@@ -114,12 +121,13 @@ static void sample(GCGState *s,uint64_t now) {
     }else{s.exceeding=NO;s.exceeded=0;publish(s,AwemeCPUGuardStatusMonitoring,percent,0);s.due=now+(percent>=s.threshold*.5?NSSEC:s.idle*NSSEC);}
 }
 static void schedule(uint64_t delay){if(timer)dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,(int64_t)MAX(delay,NSEC_PER_MSEC*100)),DISPATCH_TIME_FOREVER,NSEC_PER_MSEC*50);}
-static void run_guard(void){sync_configs();uint64_t now=now_ns();discover(now);uint64_t next=UINT64_MAX;
+static void park_timer(void){if(timer)dispatch_source_set_timer(timer,DISPATCH_TIME_FOREVER,DISPATCH_TIME_FOREVER,0);}
+static void run_guard(void){if(configsDirty){sync_configs();configsDirty=NO;}uint64_t now=now_ns();discover(now);uint64_t next=UINT64_MAX;
     for(GCGState *s in states.allValues){if(s.pid&&s.due<=now)sample(s,now);uint64_t due=0;if(s.pid)due=s.due;else if(s.type==VDTConfigTypeDaemon||s.background||[frontmostID isEqual:s.identifier])due=nextDiscovery;if(due&&due<next)next=due;}
-    if(next==UINT64_MAX)next=now+60*NSSEC;schedule(next>now?next-now:NSEC_PER_MSEC*100);}
+    if(next==UINT64_MAX){park_timer();return;}schedule(next>now?next-now:NSEC_PER_MSEC*100);}
 static NSString *frontmost_on_main(void){if(!NSThread.isMainThread)return nil;UIApplication *sb=UIApplication.sharedApplication;if(![sb respondsToSelector:@selector(_accessibilityFrontMostApplication)])return nil;id app=[(SpringBoard*)sb _accessibilityFrontMostApplication];return [app respondsToSelector:@selector(bundleIdentifier)]?[app bundleIdentifier]:nil;}
 
 %hook SpringBoard
--(void)frontDisplayDidChange:(id)value{%orig;NSString *identifier=[frontmost_on_main() copy];if(queue)dispatch_async(queue,^{frontmostID=identifier;nextDiscovery=0;for(GCGState *s in states.allValues)if(s.type==VDTConfigTypeApp)s.due=0;schedule(NSEC_PER_MSEC*100);});}
+-(void)frontDisplayDidChange:(id)value{%orig;NSString *identifier=[frontmost_on_main() copy];if(queue)dispatch_async(queue,^{frontmostID=identifier;reset_discovery();for(GCGState *s in states.allValues)if(s.type==VDTConfigTypeApp)s.due=0;schedule(NSEC_PER_MSEC*100);});}
 %end
-%ctor{@autoreleasepool{if(![NSProcessInfo.processInfo.processName isEqual:@"SpringBoard"])return;dispatch_async(dispatch_get_main_queue(),^{NSString *front=[frontmost_on_main() copy];queue=dispatch_queue_create("com.moxuan.globalcpuguard.monitor",DISPATCH_QUEUE_SERIAL);states=[NSMutableDictionary dictionary];frontmostID=front;timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,queue);dispatch_source_set_event_handler(timer,^{@autoreleasepool{run_guard();}});schedule(NSSEC);dispatch_resume(timer);notify_register_dispatch(PREFS_CHANGED_NN.UTF8String,&prefsToken,queue,^(int token){nextDiscovery=0;for(GCGState *s in states.allValues)s.due=0;schedule(NSEC_PER_MSEC*100);});});}}
+%ctor{@autoreleasepool{if(![NSProcessInfo.processInfo.processName isEqual:@"SpringBoard"])return;dispatch_async(dispatch_get_main_queue(),^{NSString *front=[frontmost_on_main() copy];queue=dispatch_queue_create("com.moxuan.globalcpuguard.monitor",DISPATCH_QUEUE_SERIAL);states=[NSMutableDictionary dictionary];frontmostID=front;timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,queue);dispatch_source_set_event_handler(timer,^{@autoreleasepool{run_guard();}});schedule(NSSEC);dispatch_resume(timer);notify_register_dispatch(PREFS_CHANGED_NN.UTF8String,&prefsToken,queue,^(int token){configsDirty=YES;reset_discovery();for(GCGState *s in states.allValues)s.due=0;schedule(NSEC_PER_MSEC*100);});});}}

@@ -37,6 +37,7 @@
 - (void)viewDidLoad
 {
 	[self applySearchControllerHideWhileScrolling:NO];
+	self.navigationItem.title=@"守护程序";
 	[[CHPDaemonList sharedInstance] addObserver:self];
 
 	if(![CHPDaemonList sharedInstance].loaded)
@@ -46,22 +47,7 @@
 			[[CHPDaemonList sharedInstance] updateDaemonListIfNeeded];
 		});
 	}
-	else
-	{
-		[self updateSuggestedDaemons];
-	}
-
 	[super viewDidLoad];
-}
-
-- (NSString*)topTitle
-{
-	return @"系统进程";
-}
-
-- (NSString*)plistName
-{
-	return nil;
 }
 
 - (NSMutableArray*)specifiers
@@ -92,13 +78,11 @@
 		}
 		else
 		{
-            _showsAllDaemons = YES;
-
 			NSArray<CHPDaemonInfo*>* daemonList = [CHPDaemonList sharedInstance].daemonList;
 
 			for(CHPDaemonInfo* info in daemonList)
 			{
-				if(_showsAllDaemons || [_suggestedDaemons containsObject:[info displayName]])
+				@autoreleasepool
 				{
 					if(_searchKey && ![_searchKey isEqualToString:@""])
 					{
@@ -155,24 +139,8 @@
     [self.navigationController popViewControllerAnimated:YES];
 }
 
-- (void)updateSuggestedDaemons
-{
-	NSMutableSet* suggestedDaemons = [NSMutableSet new];
-
-	for(CHPDaemonInfo* info in [CHPDaemonList sharedInstance].daemonList)
-	{
-		if([info.linkedFrameworkIdentifiers containsObject:@"com.apple.UIKit"])
-		{
-			[suggestedDaemons addObject:[info displayName]];
-		}
-	}
-
-	_suggestedDaemons = [suggestedDaemons copy];
-}
-
 - (void)daemonListDidUpdate:(CHPDaemonList*)list
 {
-	[self updateSuggestedDaemons];
 	[self reloadSpecifiers];
 }
 

@@ -1,6 +1,4 @@
 #import "VDTProcessConfiguration.h"
-#import "VDTApplicationListSubcontrollerController.h"
-#import "ChoicyPreferences/CHPDaemonListController.h"
 #import "../VDTShared.h"
 #include <notify.h>
 
@@ -14,12 +12,13 @@
     if (_specifiers) return _specifiers;
     NSMutableArray *items=[NSMutableArray array];
     PSSpecifier *group=[PSSpecifier groupSpecifierWithName:[self type]==VDTConfigTypeApp?@"应用 CPU 保护":@"守护程序 CPU 保护"];
-    [group setProperty:[self protectedTarget]?@"该目标属于关键系统或越狱核心进程，禁止启用终止。":@"CPU 达到阈值并连续保持设定时间后，将在终止前重新确认 PID、路径和进程启动时间。" forKey:@"footerText"];
+    [group setProperty:@"此目标已开启监控。返回主页左滑删除可关闭监控。" forKey:@"footerText"];
     [items addObject:group];
     if([self type]==VDTConfigTypeApp){PSSpecifier *background=[PSSpecifier preferenceSpecifierNamed:@"后台继续监控" target:self set:@selector(setValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSwitchCell edit:nil];[background setProperty:@"monitorInBackground" forKey:@"key"];[background setProperty:@NO forKey:@"default"];[items addObject:background];}
-    NSArray *fields=@[@[@"CPU 阈值 (%)",@"cpuThreshold",@80,@"80"],@[@"连续超限 (秒)",@"durationSeconds",@10,@"10"],@[@"低负载采样间隔 (秒)",@"idleSampleSeconds",@60,@"60"]];
+    PSSpecifier *parameters=[PSSpecifier groupSpecifierWithName:@"触发参数"];[parameters setProperty:@"CPU 阈值支持 1–1000%，可覆盖多核负载。只有持续超限达到设定时间才会终止进程。" forKey:@"footerText"];[items addObject:parameters];
+    NSArray *fields=@[@[@"CPU 阈值（%）",@"cpuThreshold",@80,@"80"],@[@"持续超限时间（秒）",@"durationSeconds",@10,@"10"],@[@"低负载采样间隔（秒）",@"idleSampleSeconds",@60,@"60"]];
     for(NSArray *field in fields){PSTextFieldSpecifier *s=[PSTextFieldSpecifier preferenceSpecifierNamed:field[0] target:self set:@selector(setValue:specifier:) get:@selector(readValue:) detail:nil cell:PSEditTextCell edit:nil];[s setKeyboardType:UIKeyboardTypeNumberPad autoCaps:UITextAutocapitalizationTypeNone autoCorrection:UITextAutocorrectionTypeNo];[s setProperty:field[1] forKey:@"key"];[s setProperty:field[2] forKey:@"default"];[s setPlaceholder:field[3]];[items addObject:s];}
-    PSSpecifier *statusGroup=[PSSpecifier groupSpecifierWithName:@"运行状态"];[items addObject:statusGroup];
+    PSSpecifier *statusGroup=[PSSpecifier groupSpecifierWithName:@"运行状态"];[statusGroup setProperty:@"监控端会持续记录状态，但本页面不会自动刷新。需要查看最新状态时请点按刷新。" forKey:@"footerText"];[items addObject:statusGroup];
     PSSpecifier *status=[PSSpecifier preferenceSpecifierNamed:@"当前状态" target:self set:nil get:@selector(readStatus:) detail:nil cell:PSTitleValueCell edit:nil];status.identifier=@"runtimeStatus";[items addObject:status];
     PSSpecifier *refresh=[PSSpecifier preferenceSpecifierNamed:@"刷新当前状态" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];[refresh setButtonAction:@selector(refreshStatus)];[items addObject:refresh];
     for(PSSpecifier *s in items)if([s propertyForKey:@"key"]){[s setProperty:VEDETTE_IDENTIFIER forKey:@"defaults"];[s setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];}

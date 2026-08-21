@@ -31,21 +31,12 @@ NSDictionary* getPrefs(){
     return [VDTDictionaryFromFile(PREFS_PATH) copy];
 }
 
-NSDictionary* getTempPrefs(){
-    return [VDTDictionaryFromFile(PREFS_PATH_TMP) copy];
-}
-
 id valueForKey(NSString *key){
     if (![key isKindOfClass:[NSString class]] || key.length == 0) return nil;
     return VDTDictionaryFromFile(PREFS_PATH)[key];
 }
 
-id valueForKeyWithPrefs(NSString *key, NSDictionary *prefs){
-    if (![key isKindOfClass:[NSString class]] || key.length == 0) return nil;
-    return prefs ? VDTValidatedPrefs(prefs)[key] : valueForKey(key);
-}
-
-void setValueForKeyWithPrefs(NSString *key, id value, NSDictionary *prefs){
+static void VDTSetValueForKeyWithPrefs(NSString *key, id value, NSDictionary *prefs){
     if (![key isKindOfClass:[NSString class]] || key.length == 0) return;
 
     NSDictionary *base = prefs ? VDTValidatedPrefs(prefs) : VDTDictionaryFromFile(PREFS_PATH);
@@ -65,10 +56,10 @@ void setValueForKeyWithPrefs(NSString *key, id value, NSDictionary *prefs){
 }
 
 void setValueForKey(NSString *key, id value){
-    setValueForKeyWithPrefs(key, value, nil);
+    VDTSetValueForKeyWithPrefs(key, value, nil);
 }
 
-id valueForProcessConfigKeyWithPrefs(NSString *identifier,
+static id VDTValueForProcessConfigKeyWithPrefs(NSString *identifier,
                                      NSString *key,
                                      id defaultValue,
                                      VDTConfigType type,
@@ -93,10 +84,10 @@ id valueForProcessConfigKeyWithPrefs(NSString *identifier,
 }
 
 id valueForProcessConfigKey(NSString *identifier, NSString *key, id defaultValue, VDTConfigType type){
-    return valueForProcessConfigKeyWithPrefs(identifier, key, defaultValue, type, nil);
+    return VDTValueForProcessConfigKeyWithPrefs(identifier, key, defaultValue, type, nil);
 }
 
-void setValueForProcessConfigKeyWithPrefs(NSString *identifier,
+static void VDTSetValueForProcessConfigKeyWithPrefs(NSString *identifier,
                                           NSString *key,
                                           id value,
                                           VDTConfigType type,
@@ -135,9 +126,9 @@ void setValueForProcessConfigKeyWithPrefs(NSString *identifier,
         [configs addObject:@{identifierKey: identifier, key: value}];
     }
 
-    setValueForKeyWithPrefs(sectionKey, configs, source);
+    VDTSetValueForKeyWithPrefs(sectionKey, configs, source);
 }
 
 void setValueForProcessConfigKey(NSString *identifier, NSString *key, id value, VDTConfigType type){
-    setValueForProcessConfigKeyWithPrefs(identifier, key, value, type, nil);
+    VDTSetValueForProcessConfigKeyWithPrefs(identifier, key, value, type, nil);
 }

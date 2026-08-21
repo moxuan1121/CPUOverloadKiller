@@ -1,5 +1,4 @@
 #include <Foundation/Foundation.h>
-#include <HBLog.h>
 #include <objc/runtime.h>
 #include <roothide.h>
 
@@ -12,14 +11,8 @@ static inline NSString *VDTPrefsPath(void) {
     return @"/var/mobile/Library/Preferences/com.moxuan.globalcpuguard.plist";
 }
 
-static inline NSString *VDTPrefsPathTmp(void) {
-    return @"/var/tmp/com.moxuan.globalcpuguard.plist";
-}
-
 #define PREFS_PATH VDTPrefsPath()
-#define PREFS_PATH_TMP VDTPrefsPathTmp()
 #define PREFS_CHANGED_NN @"com.moxuan.globalcpuguard.prefschanged"
-#define AWEME_CPU_GUARD_STATUS_NN "com.moxuan.globalcpuguard.status"
 #define VDT_JBROOT_PATH(path) jbroot(@(path))
 
 typedef NS_ENUM(uint64_t, AwemeCPUGuardStatus) {

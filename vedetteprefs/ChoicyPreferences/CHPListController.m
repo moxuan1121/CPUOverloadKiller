@@ -19,21 +19,8 @@
 // SOFTWARE.
 
 #import "CHPListController.h"
-#import "../../VDTShared.h"
 
 @implementation CHPListController
-
-//Must be overwritten by subclass
-- (NSString*)topTitle
-{
-	return nil;
-}
-
-//Must be overwritten by subclass
-- (NSString*)plistName
-{
-	return nil;
-}
 
 - (void)applySearchControllerHideWhileScrolling:(BOOL)hideWhileScrolling
 {
@@ -59,47 +46,6 @@
 {
 	_searchKey = searchController.searchBar.text;
 	[self reloadSpecifiers];
-}
-
-- (NSMutableArray*)specifiers
-{
-	if(!_specifiers)
-	{
-		NSString* plistName = [self plistName];
-
-		if(plistName)
-		{
-			_specifiers = [self loadSpecifiersFromPlistName:plistName target:self];
-			[self parseLocalizationsForSpecifiers:_specifiers];
-		}
-	}
-
-	NSString* title = [self topTitle];
-	if(title)
-	{
-		[(UINavigationItem *)self.navigationItem setTitle:title];
-	}
-
-	return _specifiers;
-}
-
-- (void)parseLocalizationsForSpecifiers:(NSArray*)specifiers
-{
-	//Localize specifiers
-	NSMutableArray* mutableSpecifiers = (NSMutableArray*)specifiers;
-	for(PSSpecifier* specifier in mutableSpecifiers)
-	{
-		specifier.name = specifier.properties[@"label"];
-		[specifier setProperty:specifier.properties[@"footerText"] forKey:@"footerText"];
-	}
-}
-
-- (id)readPreferenceValue:(PSSpecifier*)specifier {
-    return valueForKey(specifier.properties[@"key"]) ?: specifier.properties[@"default"];
-}
-
-- (void)setPreferenceValue:(id)value specifier:(PSSpecifier*)specifier {
-    setValueForKey(specifier.properties[@"key"], value);
 }
 
 @end

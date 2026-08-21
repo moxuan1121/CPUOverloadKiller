@@ -16,12 +16,9 @@
 @property (nonatomic,readonly) NSString * bundleExecutable;
 @property (nonatomic,readonly) NSString * localizedName;
 @property (nonatomic,readonly) NSURL * bundleURL;
-@property (nonatomic,readonly) NSURL * bundleContainerURL;
-@property (nonatomic,readonly) NSURL * dataContainerURL;
 @end
 
 @interface LSApplicationProxy : LSBundleProxy
-+(id)applicationProxyForBundleURL:(NSURL *)bundleURL;
 +(id)applicationProxyForIdentifier:(NSString *)identifier;
 @end
 

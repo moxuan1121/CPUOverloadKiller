@@ -26,8 +26,4 @@
     UISearchController *_searchController;
 }
 - (void)applySearchControllerHideWhileScrolling:(BOOL)hideWhileScrolling;
-- (NSString*)topTitle;
-- (NSString*)plistName;
-- (void)parseLocalizationsForSpecifiers:(NSArray*)specifiers;
 @end
-

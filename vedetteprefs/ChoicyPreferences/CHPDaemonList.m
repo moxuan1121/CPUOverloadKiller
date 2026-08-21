@@ -22,8 +22,6 @@
 #import "CHPDaemonInfo.h"
 #import "../../Common.h"
 
-#import <dirent.h>
-
 @implementation CHPDaemonList
 
 + (instancetype)sharedInstance
@@ -113,107 +111,6 @@
 		}
 	}
 
-	NSDirectoryEnumerator* systemLibraryFrameworksEnumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:@"/System/Library/Frameworks" isDirectory:YES] includingPropertiesForKeys:nil options:0 errorHandler:^(NSURL *url, NSError *error)
-	{
-		return YES;
-	}];
-
-	NSDirectoryEnumerator* systemLibraryPrivateFrameworksEnumerator = [[NSFileManager defaultManager] enumeratorAtURL:[NSURL fileURLWithPath:@"/System/Library/PrivateFrameworks" isDirectory:YES] includingPropertiesForKeys:nil options:0 errorHandler:^(NSURL *url, NSError *error)
-	{
-		return YES;
-	}];
-
-	NSMutableArray* XPCUrls = [NSMutableArray new];
-
-	for(NSURL* fileURL in systemLibraryFrameworksEnumerator)
-	{
-		if([fileURL.path hasSuffix:@".xpc"])
-		{
-			[XPCUrls addObject:fileURL];
-		}
-	}
-
-	for(NSURL* fileURL in systemLibraryPrivateFrameworksEnumerator)
-	{
-		if([fileURL.path hasSuffix:@".xpc"])
-		{
-			[XPCUrls addObject:fileURL];
-		}
-	}
-
-	for(NSURL* XPCUrl in XPCUrls)
-	{
-		NSString* XPCPath = XPCUrl.path;
-
-		NSString* XPCName = [XPCUrl.lastPathComponent stringByReplacingOccurrencesOfString:@".xpc" withString:@""];
-
-		NSString* XPCExecutablePath = [XPCPath stringByAppendingPathComponent:XPCName];
-
-		if([[NSFileManager defaultManager] fileExistsAtPath:XPCExecutablePath])
-		{
-			CHPDaemonInfo* info = [[CHPDaemonInfo alloc] init];
-			info.executablePath = XPCExecutablePath;
-
-			if(![self daemonList:daemonListM containsDisplayName:info.displayName])
-			{
-				[daemonListM addObject:info];
-			}
-		}
-	}
-
-	NSMutableArray* additionalPotentialDaemons = [NSMutableArray new];
-
-	// On A12 unc0ver, using contentsOfDirectoryAtURL on /usr/libexec locks the thread and leaves a kernel thread looping
-	// This causes all sorts of issues and heats the device up
-	// This has been fixed in unc0ver 4.0, but we still use the old solution because some people might not be updated to 4.0
-	// The C API is not affected by this issue, so we just use it instead
-	DIR *dir;
-    struct dirent* dp;
-    dir = opendir("/usr/libexec");
-	while (dir && (dp=readdir(dir)) != NULL)
-	{
-        if (!(!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")))
-        {
-            NSString* filename = [NSString stringWithCString:dp->d_name encoding:NSUTF8StringEncoding];
-            if(filename)
-			{
-				NSURL* URL = [NSURL fileURLWithPath:[@"/usr/libexec" stringByAppendingPathComponent:filename]];
-				[additionalPotentialDaemons addObject:URL];
-			}
-        }
-    }
-	if (dir) closedir(dir);
-
-	/*[additionalPotentialDaemons addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/usr/libexec" isDirectory:YES]
-                    includingPropertiesForKeys:nil
-                                       options:0
-                                         error:nil]];*/
-
-	[additionalPotentialDaemons addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/usr/bin" isDirectory:YES]
-                    includingPropertiesForKeys:nil
-                                       options:0
-                                         error:nil] ?: @[]];
-
-	[additionalPotentialDaemons addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/usr/sbin" isDirectory:YES]
-                    includingPropertiesForKeys:nil
-                                       options:0
-                                         error:nil] ?: @[]];
-
-
-	for(NSURL* URL in additionalPotentialDaemons)
-	{
-		if([URL.lastPathComponent hasSuffix:@"d"])
-		{
-			CHPDaemonInfo* info = [[CHPDaemonInfo alloc] init];
-			info.executablePath = [URL path];
-
-			if(![self daemonList:daemonListM containsDisplayName:info.displayName])
-			{
-				[daemonListM addObject:info];
-			}
-		}
-	}
-
 	[daemonListM sortUsingComparator:^NSComparisonResult(CHPDaemonInfo* a, CHPDaemonInfo* b)  //Sort alphabetically
 	{
 		return [[a displayName] localizedCaseInsensitiveCompare:[b displayName]];
@@ -231,14 +128,6 @@
 	if(![_observers containsObject:observer])
 	{
 		[_observers addObject:observer];
-	}
-}
-
-- (void)removeObserver:(id<CHPDaemonListObserver>)observer
-{
-	if([_observers containsObject:observer])
-	{
-		[_observers removeObject:observer];
 	}
 }
 
