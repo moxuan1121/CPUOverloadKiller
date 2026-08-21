@@ -22,7 +22,11 @@
 
 #import "CHPListController.h"
 
-#import "CHPDaemonListObserver.h"
+@class CHPDaemonList;
+
+@protocol CHPDaemonListObserver
+- (void)daemonListDidUpdate:(CHPDaemonList *)list;
+@end
 
 @interface CHPDaemonListController : CHPListController <CHPDaemonListObserver>
 {
@@ -32,4 +36,3 @@
 - (void)updateSuggestedDaemons;
 - (void)reloadValueOfSelectedSpecifier;
 @end
-
