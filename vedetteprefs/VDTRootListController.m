@@ -23,7 +23,7 @@
     [items addObject:status];
 
     PSSpecifier *conditions = [PSSpecifier preferenceSpecifierNamed:@"触发条件" target:nil set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
-    [conditions setProperty:@"两个数值均可手动输入。CPU 低于阈值时，连续超标计时会立即清零。" forKey:@"footerText"];
+    [conditions setProperty:@"三个数值均可手动输入。CPU 低于阈值时，连续超标计时会立即清零；低于阈值 50% 时使用低负载采样间隔。" forKey:@"footerText"];
     [items addObject:conditions];
 
     PSSpecifier *threshold = [PSSpecifier preferenceSpecifierNamed:@"总 CPU 上限 (%)" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSEditTextCell edit:nil];
@@ -43,6 +43,15 @@
     [duration setProperty:VEDETTE_IDENTIFIER forKey:@"defaults"];
     [duration setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];
     [items addObject:duration];
+
+    PSSpecifier *idleSample = [PSSpecifier preferenceSpecifierNamed:@"低负载采样间隔 (秒)" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSEditTextCell edit:nil];
+    [idleSample setProperty:@(UIKeyboardTypeNumberPad) forKey:@"keyboardType"];
+    [idleSample setProperty:@"idleSampleSeconds" forKey:@"key"];
+    [idleSample setProperty:@60 forKey:@"default"];
+    [idleSample setProperty:@"60" forKey:@"placeholder"];
+    [idleSample setProperty:VEDETTE_IDENTIFIER forKey:@"defaults"];
+    [idleSample setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];
+    [items addObject:idleSample];
 
     _specifiers = items;
     return _specifiers;
@@ -82,7 +91,7 @@
 
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = specifier.properties[@"key"];
-    if ([key isEqualToString:@"cpuThreshold"] || [key isEqualToString:@"durationSeconds"]) {
+    if ([key isEqualToString:@"cpuThreshold"] || [key isEqualToString:@"durationSeconds"] || [key isEqualToString:@"idleSampleSeconds"]) {
         NSInteger number = [value integerValue];
         NSInteger minimum = [key isEqualToString:@"cpuThreshold"] ? 1 : 1;
         NSInteger maximum = [key isEqualToString:@"cpuThreshold"] ? 1000 : 3600;

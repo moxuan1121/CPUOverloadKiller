@@ -13,7 +13,6 @@
 
 static NSString * const kAwemeBundleIdentifier = @"com.ss.iphone.ugc.Aweme";
 static const uint64_t kNanosecondsPerSecond = 1000000000ULL;
-static const uint64_t kIdleSampleNanoseconds = 60ULL * NSEC_PER_SEC;
 static const uint64_t kNearThresholdSampleNanoseconds = 1ULL * NSEC_PER_SEC;
 static const uint64_t kExceededSampleNanoseconds = NSEC_PER_MSEC * 500ULL;
 static dispatch_source_t gMonitorTimer;
@@ -190,6 +189,8 @@ static uint64_t run_aweme_cpu_guard(void) {
     BOOL enabled = prefs[@"enabled"] ? [prefs[@"enabled"] boolValue] : YES;
     int threshold = validated_integer(prefs[@"cpuThreshold"], 80, 1, 1000);
     int duration = validated_integer(prefs[@"durationSeconds"], 10, 1, 3600);
+    int idleSampleSeconds = validated_integer(prefs[@"idleSampleSeconds"], 60, 1, 3600);
+    uint64_t idleSampleNanoseconds = (uint64_t)idleSampleSeconds * NSEC_PER_SEC;
     if (!enabled) {
         trackedPID = 0;
         trackedPath = nil;
@@ -213,7 +214,7 @@ static uint64_t run_aweme_cpu_guard(void) {
         exceededNanoseconds = 0;
         wasExceeding = NO;
         publish_status(AwemeCPUGuardStatusWaitingForForeground, 0, threshold, 0);
-        return kIdleSampleNanoseconds;
+        return idleSampleNanoseconds;
     }
 
     if (trackedPID <= 0 || !aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
@@ -240,7 +241,7 @@ static uint64_t run_aweme_cpu_guard(void) {
         publish_status(AwemeCPUGuardStatusWaitingForProcess, 0, threshold, 0);
         // No CPU sampling occurs while Aweme is absent. This low-frequency
         // discovery pass preserves automatic monitoring after a relaunch.
-        return kIdleSampleNanoseconds;
+        return idleSampleNanoseconds;
     }
 
     uint64_t currentCPU = 0;
@@ -254,7 +255,7 @@ static uint64_t run_aweme_cpu_guard(void) {
         exceededNanoseconds = 0;
         wasExceeding = NO;
         publish_status(AwemeCPUGuardStatusCPUReadFailed, 0, threshold, 0);
-        return kIdleSampleNanoseconds;
+        return idleSampleNanoseconds;
     }
     if (previousWall == 0 || currentWall <= previousWall || currentCPU < previousCPU) {
         previousCPU = currentCPU;
@@ -300,7 +301,7 @@ static uint64_t run_aweme_cpu_guard(void) {
             previousCPU = 0;
             previousWall = 0;
             wasExceeding = NO;
-            return kIdleSampleNanoseconds;
+            return idleSampleNanoseconds;
         }
         return kExceededSampleNanoseconds;
     } else {
@@ -309,7 +310,7 @@ static uint64_t run_aweme_cpu_guard(void) {
         publish_status(AwemeCPUGuardStatusMonitoring, totalCPUPercent, threshold, 0);
         return totalCPUPercent >= ((double)threshold * 0.5)
             ? kNearThresholdSampleNanoseconds
-            : kIdleSampleNanoseconds;
+            : idleSampleNanoseconds;
     }
 }
 
