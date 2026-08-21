@@ -32,7 +32,7 @@ processStartAbsoluteTime, processExitAbsoluteTime; } gcg_rusage_info_v0;
 @property(copy) NSString *identifier;
 @property VDTConfigType type;
 @property BOOL background;
-@property NSUInteger threshold, duration, idle;
+@property NSUInteger threshold, duration, idle, nearThreshold, nearSample, exceedSample;
 @property pid_t pid;
 @property(copy) NSString *path;
 @property(copy) NSString *expectedPath;
@@ -97,7 +97,7 @@ static void sync_configs(void) {
         for(NSDictionary *config in list){if(![config isKindOfClass:NSDictionary.class])continue;NSString *identifier=config[def[2]];
             if(!master||!identifier.length||![config[@"enabled"] boolValue]||GCGIdentifierIsProtected(identifier))continue;
             NSString *key=key_for(type,identifier);[keep addObject:key];GCGState *s=states[key];BOOL created=!s;if(created){s=[GCGState new];s.identifier=identifier;s.type=type;states[key]=s;}
-            s.threshold=valid(config[@"cpuThreshold"],80,1,1000);s.duration=valid(config[@"durationSeconds"],10,1,3600);s.idle=valid(config[@"idleSampleSeconds"],60,1,3600);s.expectedPath=[config[@"executablePath"] isKindOfClass:NSString.class]?config[@"executablePath"]:nil;
+            s.threshold=valid(config[@"cpuThreshold"],80,2,1000);s.duration=valid(config[@"durationSeconds"],10,1,3600);s.idle=valid(config[@"idleSampleSeconds"],60,1,3600);s.nearThreshold=valid(config[@"nearThresholdPercent"],(s.threshold*2)/3,1,s.threshold-1);s.nearSample=valid(config[@"nearSampleSeconds"],15,1,3600);s.exceedSample=valid(config[@"exceedSampleSeconds"],1,1,s.duration);s.expectedPath=[config[@"executablePath"] isKindOfClass:NSString.class]?config[@"executablePath"]:nil;
             s.background=type==VDTConfigTypeDaemon||[config[@"monitorInBackground"] boolValue];if(created)publish(s,(type==VDTConfigTypeApp&&!s.background&&![frontmostID isEqual:identifier])?AwemeCPUGuardStatusWaitingForForeground:AwemeCPUGuardStatusWaitingForProcess,0,0);}}
     for(NSString *key in states.allKeys.copy)if(![keep containsObject:key]){GCGState *s=states[key];publish(s,AwemeCPUGuardStatusDisabled,0,0);clear_state(s);[states removeObjectForKey:key];}
 }
@@ -117,8 +117,8 @@ static void sample(GCGState *s,uint64_t now) {
     if(!s.oldWall||now<=s.oldWall||cpu<s.oldCPU){s.oldCPU=cpu;s.oldWall=now;s.due=now+NSSEC;publish(s,AwemeCPUGuardStatusMonitoring,0,0);return;}
     uint64_t wall=now-s.oldWall;double percent=ticks_ns(cpu-s.oldCPU)*100.0/wall;s.oldCPU=cpu;s.oldWall=now;
     if(percent>=s.threshold){if(s.exceeding)s.exceeded+=wall;else{s.exceeding=YES;s.exceeded=0;}double seconds=(double)s.exceeded/NSSEC;publish(s,AwemeCPUGuardStatusThresholdExceeded,percent,seconds);
-        if(s.exceeded>=s.duration*NSSEC&&allowed(s)&&identity(s)){int result=kill(s.pid,SIGKILL);publish(s,result==0?AwemeCPUGuardStatusKilled:AwemeCPUGuardStatusKillFailed,percent,seconds);clear_state(s);return;}s.due=now+NSEC_PER_MSEC*500;
-    }else{s.exceeding=NO;s.exceeded=0;publish(s,AwemeCPUGuardStatusMonitoring,percent,0);s.due=now+(percent>=s.threshold*.5?NSSEC:s.idle*NSSEC);}
+        if(s.exceeded>=s.duration*NSSEC&&allowed(s)&&identity(s)){int result=kill(s.pid,SIGKILL);publish(s,result==0?AwemeCPUGuardStatusKilled:AwemeCPUGuardStatusKillFailed,percent,seconds);clear_state(s);return;}s.due=now+s.exceedSample*NSSEC;
+    }else{s.exceeding=NO;s.exceeded=0;publish(s,AwemeCPUGuardStatusMonitoring,percent,0);s.due=now+(percent>=s.nearThreshold?s.nearSample*NSSEC:s.idle*NSSEC);}
 }
 static void schedule(uint64_t delay){if(timer)dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,(int64_t)MAX(delay,NSEC_PER_MSEC*100)),DISPATCH_TIME_FOREVER,NSEC_PER_MSEC*50);}
 static void park_timer(void){if(timer)dispatch_source_set_timer(timer,DISPATCH_TIME_FOREVER,DISPATCH_TIME_FOREVER,0);}
