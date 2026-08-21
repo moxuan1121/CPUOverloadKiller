@@ -55,14 +55,22 @@
         notify_get_state(token, &state);
         notify_cancel(token);
     }
-    switch ((AwemeCPUGuardStatus)state) {
+    AwemeCPUGuardStatus status = AwemeCPUGuardDecodeStatus(state);
+    double cpu = (double)AwemeCPUGuardDecodeCPUTenths(state) / 10.0;
+    NSUInteger threshold = AwemeCPUGuardDecodeThreshold(state);
+    double exceeded = (double)AwemeCPUGuardDecodeExceededTenths(state) / 10.0;
+    switch (status) {
         case AwemeCPUGuardStatusDisabled: return @"已停用";
         case AwemeCPUGuardStatusWaitingForProcess: return @"等待抖音启动";
-        case AwemeCPUGuardStatusMonitoring: return @"正在监控";
-        case AwemeCPUGuardStatusThresholdExceeded: return @"CPU 已超限，正在计时";
-        case AwemeCPUGuardStatusKilled: return @"已终止抖音";
+        case AwemeCPUGuardStatusMonitoring:
+            return [NSString stringWithFormat:@"正在监控：%.1f%% / 阈值 %lu%%", cpu, (unsigned long)threshold];
+        case AwemeCPUGuardStatusThresholdExceeded:
+            return [NSString stringWithFormat:@"已超限：%.1f%%，连续 %.1f 秒", cpu, exceeded];
+        case AwemeCPUGuardStatusKilled:
+            return [NSString stringWithFormat:@"已终止抖音：%.1f%%", cpu];
         case AwemeCPUGuardStatusCPUReadFailed: return @"CPU 读取失败";
-        case AwemeCPUGuardStatusKillFailed: return @"终止失败";
+        case AwemeCPUGuardStatusKillFailed:
+            return [NSString stringWithFormat:@"终止失败：%.1f%%", cpu];
         default: return @"插件未在 SpringBoard 中运行";
     }
 }

@@ -1,6 +1,6 @@
 Package: com.moxuan.awemecpuguard
 Name: 抖音 CPU 保护
-Version: 1.1.1
+Version: 1.1.2
 Architecture: iphoneos-arm
 Description: Terminate Aweme when total CPU stays above a configured limit.
 Maintainer: moxuan1121

@@ -10,6 +10,8 @@ RootHide 越狱插件：只监控抖音国际/中国版的目标 Bundle ID `com.
 
 监控器运行在 SpringBoard 中；Bundle ID 直接从目标应用包内的 `Info.plist` 校验，不依赖 runningboardd 中可能不可用的 `LSApplicationProxy`。设置页的“当前状态”可显示等待进程、正在监控、超限计时、终止成功以及系统调用失败。
 
+偏好文件使用共享的 `/var/mobile/Library/Preferences` 数据路径，不对该路径调用 `jbroot()`；状态页会显示监控器实际测得的 CPU 和实际生效阈值。
+
 ## 设置
 
 - 启用 CPU 保护
