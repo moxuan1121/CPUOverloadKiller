@@ -24,7 +24,7 @@
     [items addObject:status];
 
     PSSpecifier *refreshStatus = [PSSpecifier preferenceSpecifierNamed:@"刷新当前状态" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
-    [refreshStatus setProperty:NSStringFromSelector(@selector(refreshRuntimeStatus:)) forKey:@"action"];
+    [refreshStatus setButtonAction:@selector(refreshRuntimeStatus)];
     [items addObject:refreshStatus];
 
     PSSpecifier *conditions = [PSSpecifier preferenceSpecifierNamed:@"触发条件" target:nil set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
@@ -62,10 +62,15 @@
     return _specifiers;
 }
 
-- (void)refreshRuntimeStatus:(PSSpecifier *)specifier {
-    if (self.runtimeStatusSpecifier) {
-        [self reloadSpecifier:self.runtimeStatusSpecifier animated:YES];
-    }
+- (void)refreshRuntimeStatus {
+    // Wake the monitor even if it is currently in the configurable low-load
+    // sleep, then refresh the value after it has had time to publish status.
+    notify_post([PREFS_CHANGED_NN UTF8String]);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_MSEC * 350), dispatch_get_main_queue(), ^{
+        if (self.runtimeStatusSpecifier) {
+            [self reloadSpecifier:self.runtimeStatusSpecifier animated:YES];
+        }
+    });
 }
 
 - (id)readRuntimeStatus:(PSSpecifier *)specifier {
