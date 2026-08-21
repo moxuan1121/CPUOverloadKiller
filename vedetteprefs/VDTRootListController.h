@@ -10,4 +10,5 @@
 
 @interface VDTRootListController : PSListController
 @property(nonatomic, retain) UIBarButtonItem *respringBtn;
+@property(nonatomic, retain) PSSpecifier *runtimeStatusSpecifier;
 @end

@@ -20,7 +20,12 @@
     [items addObject:enabled];
 
     PSSpecifier *status = [PSSpecifier preferenceSpecifierNamed:@"当前状态" target:self set:nil get:@selector(readRuntimeStatus:) detail:nil cell:PSTitleValueCell edit:nil];
+    self.runtimeStatusSpecifier = status;
     [items addObject:status];
+
+    PSSpecifier *refreshStatus = [PSSpecifier preferenceSpecifierNamed:@"刷新当前状态" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];
+    [refreshStatus setProperty:NSStringFromSelector(@selector(refreshRuntimeStatus:)) forKey:@"action"];
+    [items addObject:refreshStatus];
 
     PSSpecifier *conditions = [PSSpecifier preferenceSpecifierNamed:@"触发条件" target:nil set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
     [conditions setProperty:@"三个数值均可手动输入。CPU 低于阈值时，连续超标计时会立即清零；低于阈值 50% 时使用低负载采样间隔。" forKey:@"footerText"];
@@ -55,6 +60,12 @@
 
     _specifiers = items;
     return _specifiers;
+}
+
+- (void)refreshRuntimeStatus:(PSSpecifier *)specifier {
+    if (self.runtimeStatusSpecifier) {
+        [self reloadSpecifier:self.runtimeStatusSpecifier animated:YES];
+    }
 }
 
 - (id)readRuntimeStatus:(PSSpecifier *)specifier {
