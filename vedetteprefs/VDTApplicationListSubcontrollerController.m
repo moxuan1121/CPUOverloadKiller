@@ -15,6 +15,7 @@ static NSString *VDTDisplayName(LSApplicationProxy *proxy){
 
 - (void)viewDidLoad{
     _loadingApplications=YES;
+    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain target:self action:@selector(cancelPicker)];
     [self applySearchControllerHideWhileScrolling:YES];
     [super viewDidLoad];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
@@ -55,13 +56,19 @@ static NSString *VDTDisplayName(LSApplicationProxy *proxy){
     return _specifiers;
 }
 
+- (void)cancelPicker{[self dismissViewControllerAnimated:YES completion:nil];}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath{
     PSSpecifier *specifier=[self specifierAtIndex:[self indexForIndexPath:indexPath]];
     NSString *identifier=[specifier propertyForKey:@"applicationIdentifier"];
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if(!identifier.length)return;
     setValueForProcessConfigKey(identifier,@"enabled",@YES,VDTConfigTypeApp);
-    [self.navigationController popViewControllerAnimated:YES];
+    if(self.navigationController.presentingViewController){
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }else{
+        [self.navigationController popViewControllerAnimated:YES];
+    }
 }
 
 @end

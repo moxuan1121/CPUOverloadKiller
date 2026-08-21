@@ -50,4 +50,16 @@ for obsolete_name in ["Vedette.png", "PayPal.png", "Reddit.png", "Twitter.png"]:
 assert "sqlite" not in core.lower()
 assert "HBLog" not in core
 
+root_controller = (root / "vedetteprefs" / "VDTRootListController.m").read_text(encoding="utf-8")
+app_controller = (root / "vedetteprefs" / "VDTApplicationListSubcontrollerController.m").read_text(encoding="utf-8")
+for required in [
+    "UIModalPresentationPageSheet",
+    "sheetPresentationController",
+    "prefersGrabberVisible",
+    "UISheetPresentationControllerDetent.largeDetent",
+]:
+    assert required in root_controller, f"missing App picker sheet behavior: {required}"
+assert "取消" in app_controller, "App picker must provide an explicit cancel action"
+assert "dismissViewControllerAnimated:YES" in app_controller, "selection must dismiss the presented sheet"
+
 print("CPUOverloadKiller structural invariants: OK")
