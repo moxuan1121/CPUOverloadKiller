@@ -21,12 +21,7 @@
 #import "../../Common.h"
 
 #import "CHPListController.h"
-
-@class CHPDaemonList;
-
-@protocol CHPDaemonListObserver
-- (void)daemonListDidUpdate:(CHPDaemonList *)list;
-@end
+#import "CHPDaemonList.h"
 
 @interface CHPDaemonListController : CHPListController <CHPDaemonListObserver>
 {

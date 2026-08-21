@@ -19,7 +19,11 @@
 // SOFTWARE.
 
 #import "../../Common.h"
-#import "CHPDaemonListObserver.h"
+@class CHPDaemonList;
+
+@protocol CHPDaemonListObserver
+- (void)daemonListDidUpdate:(CHPDaemonList *)list;
+@end
 
 @interface CHPDaemonList : NSObject
 {
@@ -35,4 +39,3 @@
 - (void)removeObserver:(id<CHPDaemonListObserver>)observer;
 - (void)sendReloadToObservers;
 @end
-
