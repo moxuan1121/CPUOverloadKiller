@@ -1,8 +1,8 @@
-Package: com.moxuan.globalcpuguard
-Name: 全局 CPU 守护
-Version: 1.0.4
+Package: com.moxuan.cpuoverloadkiller
+Name: CPUOverloadKiller
+Version: 1.0.5
 Architecture: iphoneos-arm
-Description: Lightweight per-target CPU guard for applications and daemons.
+Description: Global CPU overload watchdog for applications and daemons.
 Maintainer: moxuan1121
 Author: moxuan1121
 Section: Tweaks

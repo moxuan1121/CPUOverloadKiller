@@ -12,10 +12,10 @@ endif
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = GlobalCPUGuard
-GlobalCPUGuard_FILES = GlobalCPUGuard.xm VDTShared.mm
-GlobalCPUGuard_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)
-GlobalCPUGuard_FRAMEWORKS = UIKit
+TWEAK_NAME = CPUOverloadKiller
+CPUOverloadKiller_FILES = CPUOverloadKiller.xm VDTShared.mm
+CPUOverloadKiller_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)
+CPUOverloadKiller_FRAMEWORKS = UIKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 SUBPROJECTS += vedetteprefs

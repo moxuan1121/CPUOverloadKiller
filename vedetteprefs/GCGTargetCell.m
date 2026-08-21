@@ -41,7 +41,7 @@ UIImage *GCGDaemonIcon(void){
     if(supplied){self.imageView.image=GCGResizeIcon(supplied);}
     else if(identifier.length){
         static NSCache *cache;static dispatch_queue_t iconQueue;static dispatch_once_t once;
-        dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=160;iconQueue=dispatch_queue_create("com.moxuan.globalcpuguard.icons",DISPATCH_QUEUE_SERIAL);});
+        dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=160;iconQueue=dispatch_queue_create("com.moxuan.cpuoverloadkiller.icons",DISPATCH_QUEUE_SERIAL);});
         UIImage *cached=[cache objectForKey:identifier];
         if(cached)self.imageView.image=cached;
         else{

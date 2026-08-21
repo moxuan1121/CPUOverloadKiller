@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>entry</key><dict>
-<key>bundle</key><string>GlobalCPUGuardPrefs</string>
+<key>bundle</key><string>CPUOverloadKillerPrefs</string>
 <key>cell</key><string>PSLinkCell</string>
 <key>detail</key><string>VDTRootListController</string>
-<key>icon</key><string>GlobalCPUGuard.png</string>
+<key>icon</key><string>CPUOverloadKiller.png</string>
 <key>isController</key><true/>
-<key>label</key><string>全局 CPU 守护</string>
+<key>label</key><string>CPUOverloadKiller</string>
 </dict></dict></plist>

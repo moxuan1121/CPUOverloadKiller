@@ -1,7 +1,7 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-core = (root / "GlobalCPUGuard.xm").read_text(encoding="utf-8")
+core = (root / "CPUOverloadKiller.xm").read_text(encoding="utf-8")
 common = (root / "Common.h").read_text(encoding="utf-8")
 config = (root / "vedetteprefs/VDTProcessConfiguration.m").read_text(encoding="utf-8")
 app_list = (root / "vedetteprefs/VDTApplicationListSubcontrollerController.m").read_text(encoding="utf-8")
@@ -43,11 +43,11 @@ assert 'opendir("/usr/libexec")' not in daemon_source
 assert "linkedFrameworkIdentifiers" not in daemon_source + daemon_list
 assert "添加进程" in root_list and "UIAlertControllerStyleActionSheet" in root_list
 assert "GCGIconPointSize = 28.0" in target_cell
-for scale_name in ["GlobalCPUGuard.png", "GlobalCPUGuard@2x.png", "GlobalCPUGuard@3x.png"]:
+for scale_name in ["CPUOverloadKiller.png", "CPUOverloadKiller@2x.png", "CPUOverloadKiller@3x.png"]:
     assert (root / "vedetteprefs/Resources" / scale_name).is_file(), f"missing icon asset: {scale_name}"
 for obsolete_name in ["Vedette.png", "PayPal.png", "Reddit.png", "Twitter.png"]:
     assert not (root / "vedetteprefs/Resources" / obsolete_name).exists(), f"obsolete resource remains: {obsolete_name}"
 assert "sqlite" not in core.lower()
 assert "HBLog" not in core
 
-print("GlobalCPUGuard structural invariants: OK")
+print("CPUOverloadKiller structural invariants: OK")

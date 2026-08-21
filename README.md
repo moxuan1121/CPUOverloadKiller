@@ -1,4 +1,4 @@
-# GlobalCPUGuard
+# CPUOverloadKiller
 
 面向 iOS 15、Dopamine、RootHide 和 arm64e 的轻量全局 CPU 超限终止工具。
 

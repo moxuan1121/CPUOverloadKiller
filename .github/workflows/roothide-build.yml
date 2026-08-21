@@ -1,4 +1,4 @@
-name: Build GlobalCPUGuard RootHide
+name: Build CPUOverloadKiller RootHide
 
 on:
   workflow_dispatch:
@@ -59,20 +59,20 @@ jobs:
 
       - name: Verify package
         run: |
-          deb="$(find packages -maxdepth 1 -name 'com.moxuan.globalcpuguard_*.deb' -print -quit)"
+          deb="$(find packages -maxdepth 1 -name 'com.moxuan.cpuoverloadkiller_*.deb' -print -quit)"
           test -n "$deb" && test -s "$deb"
-          test "$(dpkg-deb -f "$deb" Package)" = "com.moxuan.globalcpuguard"
+          test "$(dpkg-deb -f "$deb" Package)" = "com.moxuan.cpuoverloadkiller"
           test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
-          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuard.dylib'
-          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuardPrefs.bundle/GlobalCPUGuardPrefs'
-          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuardPrefs.bundle/GlobalCPUGuard.png'
-          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuardPrefs.bundle/GlobalCPUGuard@2x.png'
-          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuardPrefs.bundle/GlobalCPUGuard@3x.png'
+          dpkg-deb -c "$deb" | grep -q 'CPUOverloadKiller.dylib'
+          dpkg-deb -c "$deb" | grep -q 'CPUOverloadKillerPrefs.bundle/CPUOverloadKillerPrefs'
+          dpkg-deb -c "$deb" | grep -q 'CPUOverloadKillerPrefs.bundle/CPUOverloadKiller.png'
+          dpkg-deb -c "$deb" | grep -q 'CPUOverloadKillerPrefs.bundle/CPUOverloadKiller@2x.png'
+          dpkg-deb -c "$deb" | grep -q 'CPUOverloadKillerPrefs.bundle/CPUOverloadKiller@3x.png'
           ! dpkg-deb -c "$deb" | grep -Eq 'Vedette|PayPal|Reddit|Twitter'
 
       - name: Upload RootHide deb
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: global-cpu-guard-roothide
+          name: cpu-overload-killer-roothide
           path: packages/*.deb
           if-no-files-found: error

@@ -2,17 +2,17 @@
 #include <objc/runtime.h>
 #include <roothide.h>
 
-#define VEDETTE_IDENTIFIER @"com.moxuan.globalcpuguard"
+#define VEDETTE_IDENTIFIER @"com.moxuan.cpuoverloadkiller"
 
 static inline NSString *VDTPrefsPath(void) {
     // /var/mobile is the shared user-data volume, not a jailbreak-root path.
     // Applying jbroot() here can make Preferences and SpringBoard observe
     // different files under RootHide and silently fall back to defaults.
-    return @"/var/mobile/Library/Preferences/com.moxuan.globalcpuguard.plist";
+    return @"/var/mobile/Library/Preferences/com.moxuan.cpuoverloadkiller.plist";
 }
 
 #define PREFS_PATH VDTPrefsPath()
-#define PREFS_CHANGED_NN @"com.moxuan.globalcpuguard.prefschanged"
+#define PREFS_CHANGED_NN @"com.moxuan.cpuoverloadkiller.prefschanged"
 #define VDT_JBROOT_PATH(path) jbroot(@(path))
 
 typedef NS_ENUM(uint64_t, AwemeCPUGuardStatus) {
@@ -35,7 +35,7 @@ static inline NSString *GCGStatusNotificationName(NSUInteger type, NSString *ide
         hash ^= bytes[index];
         hash *= 1099511628211ULL;
     }
-    return [NSString stringWithFormat:@"com.moxuan.globalcpuguard.status.%lu.%016llx",
+    return [NSString stringWithFormat:@"com.moxuan.cpuoverloadkiller.status.%lu.%016llx",
             (unsigned long)type, (unsigned long long)hash];
 }
 

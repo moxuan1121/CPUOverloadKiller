@@ -11,7 +11,7 @@ static NSString *GCGAppName(NSString *identifier){Class proxyClass=NSClassFromSt
 @implementation VDTRootListController
 - (NSArray *)specifiers {
     if(_specifiers)return _specifiers;NSMutableArray *items=[NSMutableArray array];
-    PSSpecifier *main=[PSSpecifier groupSpecifierWithName:@"全局 CPU 守护"];
+    PSSpecifier *main=[PSSpecifier groupSpecifierWithName:@"CPUOverloadKiller"];
     [main setProperty:@"仅监控下方列表中的目标。App 默认只在前台采样；守护程序运行时监控。没有可采样目标时会停止定时器。" forKey:@"footerText"];[items addObject:main];
     PSSpecifier *enabled=[PSSpecifier preferenceSpecifierNamed:@"启用全局保护" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSSwitchCell edit:nil];[enabled setProperty:@"enabled" forKey:@"key"];[enabled setProperty:@YES forKey:@"default"];[enabled setProperty:VEDETTE_IDENTIFIER forKey:@"defaults"];[enabled setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];[items addObject:enabled];
     PSSpecifier *targets=[PSSpecifier groupSpecifierWithName:@"添加目标"];[targets setProperty:@"点按目标即可添加并开启监控，随后自动返回本页。" forKey:@"footerText"];[items addObject:targets];
