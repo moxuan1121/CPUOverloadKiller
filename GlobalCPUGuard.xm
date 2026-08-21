@@ -2,6 +2,7 @@
 #import "VDTShared.h"
 #import <UIKit/UIKit.h>
 #include <libproc/libproc.h>
+#include <libproc/libproc_internal.h>
 #include <mach/mach_time.h>
 #include <notify.h>
 #include <signal.h>
@@ -75,8 +76,8 @@ static void bind_state(GCGState *s,pid_t pid,NSString *path,uint64_t start,uint6
 static BOOL identity(GCGState *s) {
     NSString *path=pid_path(s.pid);uint64_t start=0;
     if(!path.length||![path isEqual:s.path]||!usage(s.pid,NULL,&start)||start!=s.start)return NO;
-    return s.type==VDTConfigTypeApp?[[bundle_for_path(path)?:@""] isEqual:s.identifier]:
-        ([[pid_name(s.pid)?:@""] isEqual:s.identifier]&&(!s.expectedPath.length||[path isEqual:s.expectedPath]));
+    return s.type==VDTConfigTypeApp?[(bundle_for_path(path)?:@"") isEqualToString:s.identifier]:
+        ([(pid_name(s.pid)?:@"") isEqualToString:s.identifier]&&(!s.expectedPath.length||[path isEqualToString:s.expectedPath]));
 }
 static BOOL allowed(GCGState *s) { return s.type==VDTConfigTypeDaemon||s.background||[frontmostID isEqual:s.identifier]; }
 
@@ -93,7 +94,7 @@ static void sync_configs(void) {
 }
 static void discover(uint64_t now) {
     BOOL missing=NO;for(GCGState *s in states.allValues)if(!s.pid){missing=YES;break;}if(!missing||now<nextDiscovery)return;nextDiscovery=now+5*NSSEC;
-    int bytes=proc_listpids(PROC_ALL_PIDS,0,NULL,0);if(bytes<=0)return;int *pids=calloc(1,bytes);if(!pids)return;int count=proc_listpids(PROC_ALL_PIDS,0,pids,bytes)/(int)sizeof(int);
+    int bytes=proc_listpids(PROC_ALL_PIDS,0,NULL,0);if(bytes<=0)return;int *pids=(int *)calloc(1,(size_t)bytes);if(!pids)return;int count=proc_listpids(PROC_ALL_PIDS,0,pids,bytes)/(int)sizeof(int);
     for(int i=0;i<count;i++){pid_t pid=pids[i];NSString *path=pid_path(pid);if(!path.length)continue;NSString *name=nil,*bundle=nil;
         for(GCGState *s in states.allValues){if(s.pid)continue;BOOL match=NO;if(s.type==VDTConfigTypeDaemon){if(!name)name=pid_name(pid);match=[name isEqual:s.identifier]&&(!s.expectedPath.length||[path isEqual:s.expectedPath]);}else{if(!bundle)bundle=bundle_for_path(path);match=[bundle isEqual:s.identifier];}
             uint64_t start=0;if(match&&usage(pid,NULL,&start)){bind_state(s,pid,path,start,now);publish(s,AwemeCPUGuardStatusMonitoring,0,0);}}}free(pids);

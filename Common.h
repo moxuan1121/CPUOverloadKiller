@@ -36,7 +36,7 @@ typedef NS_ENUM(uint64_t, AwemeCPUGuardStatus) {
 
 static inline NSString *GCGStatusNotificationName(NSUInteger type, NSString *identifier) {
     NSData *data = [identifier dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
-    const uint8_t *bytes = data.bytes;
+    const uint8_t *bytes = (const uint8_t *)data.bytes;
     uint64_t hash = 1469598103934665603ULL;
     for (NSUInteger index = 0; index < data.length; index++) {
         hash ^= bytes[index];
