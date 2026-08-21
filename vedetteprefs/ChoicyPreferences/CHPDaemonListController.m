@@ -38,6 +38,7 @@
 {
 	[self applySearchControllerHideWhileScrolling:NO];
 	self.navigationItem.title=@"守护程序";
+    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain target:self action:@selector(cancelPicker)];
 	[[CHPDaemonList sharedInstance] addObserver:self];
 
 	if(![CHPDaemonList sharedInstance].loaded)
@@ -121,6 +122,8 @@
 	return specifiers;
 }
 
+- (void)cancelPicker{[self dismissViewControllerAnimated:YES completion:nil];}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     PSSpecifier *specifier=[self specifierAtIndex:[self indexForIndexPath:indexPath]];
@@ -136,7 +139,12 @@
     CHPDaemonInfo *info=[specifier propertyForKey:@"daemonInfo"];
     if(info.executablePath.length)setValueForProcessConfigKey(identifier,@"executablePath",info.executablePath,VDTConfigTypeDaemon);
     setValueForProcessConfigKey(identifier,@"enabled",@YES,VDTConfigTypeDaemon);
-    [self.navigationController popViewControllerAnimated:YES];
+    if(self.selectionHandler)self.selectionHandler();
+    if(self.navigationController.presentingViewController){
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }else{
+        [self.navigationController popViewControllerAnimated:YES];
+    }
 }
 
 - (void)daemonListDidUpdate:(CHPDaemonList*)list

@@ -22,8 +22,25 @@ static NSString *GCGAppName(NSString *identifier){Class proxyClass=NSClassFromSt
     PSSpecifier *about=[PSSpecifier groupSpecifierWithName:@"工作方式"];[about setProperty:@"低负载时按自定义间隔采样；达到阈值一半后每 1 秒采样；超限计时期间每 0.5 秒采样。终止前会复核进程身份，关键系统及越狱核心进程无法添加。" forKey:@"footerText"];[items addObject:about];
     _specifiers=items;return _specifiers;
 }
+- (void)reloadConfiguredTargets{_specifiers=nil;[self reloadSpecifiers];}
 - (void)presentApplicationPicker{
+    __weak typeof(self) weakSelf=self;
     VDTApplicationListSubcontrollerController *picker=[VDTApplicationListSubcontrollerController new];
+    picker.selectionHandler=^{[weakSelf reloadConfiguredTargets];};
+    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:picker];
+    navigation.modalPresentationStyle=UIModalPresentationPageSheet;
+    if(@available(iOS 15.0,*)){
+        UISheetPresentationController *sheet=navigation.sheetPresentationController;
+        sheet.detents=@[UISheetPresentationControllerDetent.largeDetent];
+        sheet.prefersGrabberVisible=YES;
+        sheet.preferredCornerRadius=16.0;
+    }
+    [self presentViewController:navigation animated:YES completion:nil];
+}
+- (void)presentDaemonPicker{
+    __weak typeof(self) weakSelf=self;
+    CHPDaemonListController *picker=[CHPDaemonListController new];
+    picker.selectionHandler=^{[weakSelf reloadConfiguredTargets];};
     UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:picker];
     navigation.modalPresentationStyle=UIModalPresentationPageSheet;
     if(@available(iOS 15.0,*)){
@@ -38,7 +55,7 @@ static NSString *GCGAppName(NSString *identifier){Class proxyClass=NSClassFromSt
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"选择目标" message:@"选择添加的进程类型" preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
     [sheet addAction:[UIAlertAction actionWithTitle:@"应用程序" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[weakSelf presentApplicationPicker];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"守护程序" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[weakSelf.navigationController pushViewController:[CHPDaemonListController new] animated:YES];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"守护程序" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[weakSelf presentDaemonPicker];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     UIPopoverPresentationController *popover=sheet.popoverPresentationController;if(popover){popover.sourceView=self.view;popover.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMaxY(self.view.bounds)-1,1,1);}
     [self presentViewController:sheet animated:YES completion:nil];

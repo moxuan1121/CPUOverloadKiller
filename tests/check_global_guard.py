@@ -59,6 +59,13 @@ for required in [
     "UISheetPresentationControllerDetent.largeDetent",
 ]:
     assert required in root_controller, f"missing App picker sheet behavior: {required}"
+assert "selectionHandler" in app_controller, "App selection must notify the root controller before dismissal"
+daemon_controller = (root / "vedetteprefs" / "ChoicyPreferences" / "CHPDaemonListController.m").read_text(encoding="utf-8")
+assert "selectionHandler" in daemon_controller, "daemon selection must notify the root controller before dismissal"
+assert "presentDaemonPicker" in root_controller, "daemon picker must be presented as a sheet"
+assert root_controller.count("UIModalPresentationPageSheet") >= 2, "both App and daemon pickers must use page sheets"
+assert root_controller.count("prefersGrabberVisible=YES") >= 2, "both sheets must expose a drag indicator"
+assert "reloadConfiguredTargets" in root_controller, "root controller must refresh immediately after a selection"
 assert "取消" in app_controller, "App picker must provide an explicit cancel action"
 assert "dismissViewControllerAnimated:YES" in app_controller, "selection must dismiss the presented sheet"
 

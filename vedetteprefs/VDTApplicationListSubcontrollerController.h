@@ -10,4 +10,5 @@
     NSArray *_applications;
     BOOL _loadingApplications;
 }
+@property(nonatomic,copy) void (^selectionHandler)(void);
 @end

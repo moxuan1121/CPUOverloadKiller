@@ -64,6 +64,7 @@ static NSString *VDTDisplayName(LSApplicationProxy *proxy){
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if(!identifier.length)return;
     setValueForProcessConfigKey(identifier,@"enabled",@YES,VDTConfigTypeApp);
+    if(self.selectionHandler)self.selectionHandler();
     if(self.navigationController.presentingViewController){
         [self dismissViewControllerAnimated:YES completion:nil];
     }else{

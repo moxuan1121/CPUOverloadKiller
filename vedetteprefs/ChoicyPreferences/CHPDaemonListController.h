@@ -24,4 +24,5 @@
 #import "CHPDaemonList.h"
 
 @interface CHPDaemonListController : CHPListController <CHPDaemonListObserver>
+@property(nonatomic,copy) void (^selectionHandler)(void);
 @end

@@ -1,6 +1,6 @@
 Package: com.moxuan.cpuoverloadkiller
 Name: CPUOverloadKiller
-Version: 1.0.6
+Version: 1.0.7
 Architecture: iphoneos-arm
 Description: Global CPU overload watchdog for applications and daemons.
 Maintainer: moxuan1121
