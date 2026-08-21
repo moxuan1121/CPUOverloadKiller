@@ -8,12 +8,6 @@
 #import <Preferences/PSSpecifier.h>
 #import "PrivateHeaders.h"
 
-@interface VDTProcessConfiguration : PSListController{
-    PSSpecifier *_intervalSpecifier;
-    PSSpecifier *_enabledSpecifier;
-    PSSpecifier *_throttleLimitSpecifier;
-    PSSpecifier *_recoveryCPUSpecifier;
-}
+@interface VDTProcessConfiguration : PSListController
 
 @end
-

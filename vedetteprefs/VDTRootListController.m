@@ -18,7 +18,7 @@ static NSString *GCGAppName(NSString *identifier){Class proxyClass=NSClassFromSt
     PSSpecifier *enabled=[PSSpecifier preferenceSpecifierNamed:@"启用全局保护" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:nil cell:PSSwitchCell edit:nil];[enabled setProperty:@"enabled" forKey:@"key"];[enabled setProperty:@YES forKey:@"default"];[enabled setProperty:VEDETTE_IDENTIFIER forKey:@"defaults"];[enabled setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];[items addObject:enabled];
     PSSpecifier *targets=[PSSpecifier groupSpecifierWithName:@"添加和管理目标"];[targets setProperty:@"点击添加进程后选择应用程序或守护程序。列表支持搜索；进入目标后可设置阈值、连续超限时间和低负载采样间隔。" forKey:@"footerText"];[items addObject:targets];
     PSSpecifier *add=[PSSpecifier preferenceSpecifierNamed:@"添加进程" target:self set:nil get:nil detail:nil cell:PSButtonCell edit:nil];[add setButtonAction:@selector(addProcess)];[items addObject:add];
-    NSDictionary *prefs=getPrefs()?:@{};PSSpecifier *configured=[PSSpecifier groupSpecifierWithName:@"已启用目标"];[items addObject:configured];
+    NSDictionary *prefs=getPrefs()?:@{};PSSpecifier *configured=[PSSpecifier groupSpecifierWithName:@"正在监控目标"];[configured setProperty:@"列表中的目标均已开启监控。左滑目标并删除即可关闭监控。" forKey:@"footerText"];[items addObject:configured];
     for(NSDictionary *config in [prefs[@"appConfigs"] isKindOfClass:NSArray.class]?prefs[@"appConfigs"]:@[]){NSString *identifier=config[@"bundleIdentifier"];if(!identifier.length||![config[@"enabled"] boolValue])continue;PSSpecifier *s=[PSSpecifier preferenceSpecifierNamed:GCGAppName(identifier) target:self set:nil get:nil detail:VDTProcessConfiguration.class cell:PSLinkCell edit:nil];[s setProperty:GCGTargetCell.class forKey:@"cellClass"];[s setProperty:identifier forKey:@"applicationIdentifier"];[s setProperty:@(VDTConfigTypeApp) forKey:@"configurationType"];UIImage *icon=GCGIcon(identifier);if(icon)[s setProperty:icon forKey:@"iconImage"];[s setProperty:identifier forKey:@"subtitle"];[items addObject:s];}
     for(NSDictionary *config in [prefs[@"daemonConfigs"] isKindOfClass:NSArray.class]?prefs[@"daemonConfigs"]:@[]){NSString *identifier=config[@"daemonName"];if(!identifier.length||![config[@"enabled"] boolValue])continue;PSSpecifier *s=[PSSpecifier preferenceSpecifierNamed:identifier target:self set:nil get:nil detail:VDTProcessConfiguration.class cell:PSLinkCell edit:nil];[s setProperty:GCGTargetCell.class forKey:@"cellClass"];[s setProperty:identifier forKey:@"daemonName"];[s setProperty:@(VDTConfigTypeDaemon) forKey:@"configurationType"];[s setProperty:@"守护程序" forKey:@"subtitle"];[s setProperty:GCGDaemonIcon() forKey:@"iconImage"];[items addObject:s];}
     PSSpecifier *about=[PSSpecifier groupSpecifierWithName:@"说明"];[about setProperty:@"CPU 低于阈值 50% 时使用低负载间隔；接近阈值每 1 秒检测；超限后每 0.5 秒检测。终止前重新校验 PID、路径、标识和启动时间。关键系统及越狱核心进程禁止启用。" forKey:@"footerText"];[items addObject:about];
@@ -34,6 +34,21 @@ static NSString *GCGAppName(NSString *identifier){Class proxyClass=NSClassFromSt
     [self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)viewWillAppear:(BOOL)animated{[super viewWillAppear:animated];if(_specifiers){_specifiers=nil;[self reloadSpecifiers];}}
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath{
+    PSSpecifier *specifier=[self specifierAtIndex:[self indexForIndexPath:indexPath]];
+    return [specifier propertyForKey:@"configurationType"]!=nil;
+}
+- (NSString *)tableView:(UITableView *)tableView titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath{return @"删除";}
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath{
+    if(editingStyle!=UITableViewCellEditingStyleDelete)return;
+    PSSpecifier *specifier=[self specifierAtIndex:[self indexForIndexPath:indexPath]];
+    NSNumber *typeNumber=[specifier propertyForKey:@"configurationType"];
+    if(!typeNumber)return;
+    VDTConfigType type=(VDTConfigType)typeNumber.unsignedIntegerValue;
+    NSString *identifier=[specifier propertyForKey:type==VDTConfigTypeApp?@"applicationIdentifier":@"daemonName"];
+    if(identifier.length)setValueForProcessConfigKey(identifier,@"enabled",@NO,type);
+    _specifiers=nil;[self reloadSpecifiers];
+}
 - (id)readPreferenceValue:(PSSpecifier *)specifier{return valueForKey([specifier propertyForKey:@"key"])?:[specifier propertyForKey:@"default"];}
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier{setValueForKey([specifier propertyForKey:@"key"],value);}
 @end

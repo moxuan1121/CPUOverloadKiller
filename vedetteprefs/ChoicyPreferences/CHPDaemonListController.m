@@ -22,13 +22,8 @@
 
 #import "CHPDaemonInfo.h"
 #import "CHPDaemonList.h"
-#import "../VDTProcessConfiguration.h"
 #import "../GCGTargetCell.h"
 #import "../../VDTShared.h"
-
-@interface PSListController()
-- (id)controllerForSpecifier:(PSSpecifier*)specifier;
-@end
 
 @implementation CHPDaemonListController
 
@@ -117,8 +112,8 @@
 					PSSpecifier* specifier = [PSSpecifier preferenceSpecifierNamed:[info displayName]
 								target:self
 								set:nil
-								get:@selector(previewStringForSpecifier:)
-								detail:[VDTProcessConfiguration class]
+								get:nil
+								detail:nil
 								cell:PSLinkListCell
 								edit:nil];
                     [specifier setProperty:@(VDTConfigTypeDaemon) forKey:@"configurationType"];
@@ -141,21 +136,22 @@
 	return specifiers;
 }
 
-extern NSString* previewStringForSettings(NSDictionary* settings);
-
-- (id)previewStringForSpecifier:(PSSpecifier*)specifier
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return [valueForProcessConfigKey([specifier propertyForKey:@"daemonName"], @"enabled", nil, VDTConfigTypeDaemon) boolValue] ? @"已启用" : @"";
-}
-
-- (void)reloadValueOfSelectedSpecifier
-{
-	UITableView* tableView = [self valueForKey:@"_table"];
-	for(NSIndexPath* selectedIndexPath in tableView.indexPathsForSelectedRows)
-	{
-		PSSpecifier* specifier = [self specifierAtIndex:[self indexForIndexPath:selectedIndexPath]];
-		[self reloadSpecifier:specifier];
-	}
+    PSSpecifier *specifier=[self specifierAtIndex:[self indexForIndexPath:indexPath]];
+    NSString *identifier=[specifier propertyForKey:@"daemonName"];
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if(!identifier.length)return;
+    if(GCGIdentifierIsProtected(identifier)){
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"禁止添加" message:@"该目标属于关键系统或越狱核心进程，不能启用 CPU 终止监控。" preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    CHPDaemonInfo *info=[specifier propertyForKey:@"daemonInfo"];
+    if(info.executablePath.length)setValueForProcessConfigKey(identifier,@"executablePath",info.executablePath,VDTConfigTypeDaemon);
+    setValueForProcessConfigKey(identifier,@"enabled",@YES,VDTConfigTypeDaemon);
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (void)updateSuggestedDaemons
@@ -177,19 +173,6 @@ extern NSString* previewStringForSettings(NSDictionary* settings);
 {
 	[self updateSuggestedDaemons];
 	[self reloadSpecifiers];
-}
-
-- (id)controllerForSpecifier:(PSSpecifier*)specifier
-{
-    if (@available(iOS 11.0, *)){
-    }else{
-		[UIView performWithoutAnimation:^
-		{
-			_searchController.active = NO;
-		}];
-	}
-
-	return [super controllerForSpecifier:specifier];
 }
 
 @end

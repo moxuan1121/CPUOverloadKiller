@@ -16,8 +16,6 @@
     PSSpecifier *group=[PSSpecifier groupSpecifierWithName:[self type]==VDTConfigTypeApp?@"应用 CPU 保护":@"守护程序 CPU 保护"];
     [group setProperty:[self protectedTarget]?@"该目标属于关键系统或越狱核心进程，禁止启用终止。":@"CPU 达到阈值并连续保持设定时间后，将在终止前重新确认 PID、路径和进程启动时间。" forKey:@"footerText"];
     [items addObject:group];
-    _enabledSpecifier=[PSSpecifier preferenceSpecifierNamed:@"启用监控" target:self set:@selector(setValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSwitchCell edit:nil];
-    [_enabledSpecifier setProperty:@"enabled" forKey:@"key"];[_enabledSpecifier setProperty:@NO forKey:@"default"];[_enabledSpecifier setProperty:@(![self protectedTarget]) forKey:@"enabled"];[items addObject:_enabledSpecifier];
     if([self type]==VDTConfigTypeApp){PSSpecifier *background=[PSSpecifier preferenceSpecifierNamed:@"后台继续监控" target:self set:@selector(setValue:specifier:) get:@selector(readValue:) detail:nil cell:PSSwitchCell edit:nil];[background setProperty:@"monitorInBackground" forKey:@"key"];[background setProperty:@NO forKey:@"default"];[items addObject:background];}
     NSArray *fields=@[@[@"CPU 阈值 (%)",@"cpuThreshold",@80,@"80"],@[@"连续超限 (秒)",@"durationSeconds",@10,@"10"],@[@"低负载采样间隔 (秒)",@"idleSampleSeconds",@60,@"60"]];
     for(NSArray *field in fields){PSTextFieldSpecifier *s=[PSTextFieldSpecifier preferenceSpecifierNamed:field[0] target:self set:@selector(setValue:specifier:) get:@selector(readValue:) detail:nil cell:PSEditTextCell edit:nil];[s setKeyboardType:UIKeyboardTypeNumberPad autoCaps:UITextAutocapitalizationTypeNone autoCorrection:UITextAutocorrectionTypeNo];[s setProperty:field[1] forKey:@"key"];[s setProperty:field[2] forKey:@"default"];[s setPlaceholder:field[3]];[items addObject:s];}
@@ -32,7 +30,6 @@
 - (void)setValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key=[specifier propertyForKey:@"key"];
     if(![key isEqual:@"enabled"]&&![key isEqual:@"monitorInBackground"]){NSInteger n=[value integerValue];NSInteger max=[key isEqual:@"cpuThreshold"]?1000:3600;if(n<1)n=1;if(n>max)n=max;value=@(n);}
-    if([key isEqual:@"enabled"]&&[value boolValue]&&[self protectedTarget])value=@NO;
     if([self type]==VDTConfigTypeDaemon){id info=[[self specifier] propertyForKey:@"daemonInfo"];NSString *path=[info respondsToSelector:@selector(executablePath)]?[info executablePath]:nil;if(path.length)setValueForProcessConfigKey([self identifier],@"executablePath",path,[self type]);}
     setValueForProcessConfigKey([self identifier],key,value,[self type]);
 }

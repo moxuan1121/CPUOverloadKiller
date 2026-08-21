@@ -1,5 +1,6 @@
 #import "GCGTargetCell.h"
 #import <Preferences/PSSpecifier.h>
+#import <objc/message.h>
 
 static const CGFloat GCGIconPointSize = 28.0;
 
@@ -22,6 +23,7 @@ UIImage *GCGDaemonIcon(void){
 
 @interface GCGTargetCell ()
 @property(nonatomic,strong) PSSpecifier *gcgSpecifier;
+@property(nonatomic,copy) NSString *gcgApplicationIdentifier;
 @end
 
 @implementation GCGTargetCell
@@ -33,7 +35,26 @@ UIImage *GCGDaemonIcon(void){
 - (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier{
     self.gcgSpecifier=specifier;
     [super refreshCellContentsWithSpecifier:specifier];
-    self.imageView.image=GCGResizeIcon([specifier propertyForKey:@"iconImage"]);
+    NSString *identifier=[specifier propertyForKey:@"applicationIdentifier"];
+    self.gcgApplicationIdentifier=identifier;
+    UIImage *supplied=[specifier propertyForKey:@"iconImage"];
+    if(supplied){self.imageView.image=GCGResizeIcon(supplied);}
+    else if(identifier.length){
+        static NSCache *cache;static dispatch_queue_t iconQueue;static dispatch_once_t once;
+        dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=160;iconQueue=dispatch_queue_create("com.moxuan.globalcpuguard.icons",DISPATCH_QUEUE_SERIAL);});
+        UIImage *cached=[cache objectForKey:identifier];
+        if(cached)self.imageView.image=cached;
+        else{
+            UIImage *placeholder=nil;if(@available(iOS 13.0,*))placeholder=[UIImage systemImageNamed:@"app.fill"];
+            self.imageView.image=GCGResizeIcon(placeholder);
+            __weak typeof(self) weakSelf=self;NSString *requested=[identifier copy];CGFloat screenScale=UIScreen.mainScreen.scale;
+            dispatch_async(iconQueue,^{
+                SEL selector=NSSelectorFromString(@"_applicationIconImageForBundleIdentifier:format:scale:");UIImage *icon=nil;
+                if([UIImage respondsToSelector:selector]){typedef UIImage *(*Fn)(id,SEL,NSString*,NSInteger,CGFloat);icon=((Fn)objc_msgSend)(UIImage.class,selector,requested,2,screenScale);}
+                dispatch_async(dispatch_get_main_queue(),^{UIImage *resized=GCGResizeIcon(icon);if(resized)[cache setObject:resized forKey:requested];if([weakSelf.gcgApplicationIdentifier isEqualToString:requested]&&resized)weakSelf.imageView.image=resized;});
+            });
+        }
+    }else self.imageView.image=nil;
     self.detailTextLabel.text=[specifier propertyForKey:@"subtitle"];
 }
 - (void)layoutSubviews{

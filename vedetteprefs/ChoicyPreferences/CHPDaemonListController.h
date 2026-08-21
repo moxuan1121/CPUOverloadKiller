@@ -29,5 +29,4 @@
 	BOOL _showsAllDaemons;
 }
 - (void)updateSuggestedDaemons;
-- (void)reloadValueOfSelectedSpecifier;
 @end

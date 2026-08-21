@@ -8,8 +8,6 @@
 
 @interface VDTApplicationListSubcontrollerController : CHPListController {
     NSArray *_applications;
+    BOOL _loadingApplications;
 }
-
-- (PSSpecifier *)specifierForApplicationWithIdentifier:(NSString *)applicationID;
 @end
-

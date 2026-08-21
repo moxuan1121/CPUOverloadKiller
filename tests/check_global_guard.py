@@ -22,11 +22,16 @@ for item in ["launchd", "springboard", "runningboardd", "roothide", "dopamine"]:
     assert item in common.lower(), f"missing protected target: {item}"
 
 assert "后台继续监控" in config
+assert "启用监控" not in config
 assert "低负载采样间隔" in config
 assert "刷新当前状态" in config
-assert "_applicationIconImageForBundleIdentifier" in app_list
+assert "QOS_CLASS_USER_INITIATED" in app_list and "_loadingApplications" in app_list
+assert "_applicationIconImageForBundleIdentifier" in target_cell
+assert "NSCache" in target_cell and "iconQueue" in target_cell
 assert "UISearch" in (root / "vedetteprefs/ChoicyPreferences/CHPListController.h").read_text(encoding="utf-8")
-assert "VDTProcessConfiguration" in daemon_list
+assert 'setValueForProcessConfigKey(identifier,@"enabled",@YES' in app_list
+assert 'setValueForProcessConfigKey(identifier,@"enabled",@YES' in daemon_list
+assert "commitEditingStyle" in root_list and '@"enabled",@NO' in root_list
 assert "添加进程" in root_list and "UIAlertControllerStyleActionSheet" in root_list
 assert "GCGIconPointSize = 28.0" in target_cell
 for scale_name in ["GlobalCPUGuard.png", "GlobalCPUGuard@2x.png", "GlobalCPUGuard@3x.png"]:
