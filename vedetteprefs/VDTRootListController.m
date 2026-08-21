@@ -1,5 +1,6 @@
 #import "VDTRootListController.h"
 #import "../VDTShared.h"
+#include <notify.h>
 
 @implementation VDTRootListController
 
@@ -17,6 +18,9 @@
     [enabled setProperty:VEDETTE_IDENTIFIER forKey:@"defaults"];
     [enabled setProperty:PREFS_CHANGED_NN forKey:@"PostNotification"];
     [items addObject:enabled];
+
+    PSSpecifier *status = [PSSpecifier preferenceSpecifierNamed:@"当前状态" target:self set:nil get:@selector(readRuntimeStatus:) detail:nil cell:PSTitleValueCell edit:nil];
+    [items addObject:status];
 
     PSSpecifier *conditions = [PSSpecifier preferenceSpecifierNamed:@"触发条件" target:nil set:nil get:nil detail:nil cell:PSGroupCell edit:nil];
     [conditions setProperty:@"两个数值均可手动输入。CPU 低于阈值时，连续超标计时会立即清零。" forKey:@"footerText"];
@@ -42,6 +46,25 @@
 
     _specifiers = items;
     return _specifiers;
+}
+
+- (id)readRuntimeStatus:(PSSpecifier *)specifier {
+    int token = -1;
+    uint64_t state = AwemeCPUGuardStatusUnknown;
+    if (notify_register_check(AWEME_CPU_GUARD_STATUS_NN, &token) == NOTIFY_STATUS_OK) {
+        notify_get_state(token, &state);
+        notify_cancel(token);
+    }
+    switch ((AwemeCPUGuardStatus)state) {
+        case AwemeCPUGuardStatusDisabled: return @"已停用";
+        case AwemeCPUGuardStatusWaitingForProcess: return @"等待抖音启动";
+        case AwemeCPUGuardStatusMonitoring: return @"正在监控";
+        case AwemeCPUGuardStatusThresholdExceeded: return @"CPU 已超限，正在计时";
+        case AwemeCPUGuardStatusKilled: return @"已终止抖音";
+        case AwemeCPUGuardStatusCPUReadFailed: return @"CPU 读取失败";
+        case AwemeCPUGuardStatusKillFailed: return @"终止失败";
+        default: return @"插件未在 SpringBoard 中运行";
+    }
 }
 
 - (id)readPreferenceValue:(PSSpecifier *)specifier {

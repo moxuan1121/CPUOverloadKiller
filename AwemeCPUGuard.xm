@@ -3,12 +3,28 @@
 
 #include <libproc/libproc.h>
 #include <libproc/libproc_internal.h>
+#include <errno.h>
+#include <notify.h>
 #include <signal.h>
 #include <time.h>
 
 static NSString * const kAwemeBundleIdentifier = @"com.ss.iphone.ugc.Aweme";
 static const uint64_t kNanosecondsPerSecond = 1000000000ULL;
 static dispatch_source_t gMonitorTimer;
+
+static void publish_status(AwemeCPUGuardStatus status) {
+    static int token = -1;
+    static AwemeCPUGuardStatus previous = AwemeCPUGuardStatusUnknown;
+    if (status == previous) return;
+    if (token < 0 && notify_register_check(AWEME_CPU_GUARD_STATUS_NN, &token) != NOTIFY_STATUS_OK) {
+        token = -1;
+        return;
+    }
+    if (notify_set_state(token, (uint64_t)status) == NOTIFY_STATUS_OK) {
+        previous = status;
+        notify_post(AWEME_CPU_GUARD_STATUS_NN);
+    }
+}
 
 typedef struct {
     uint8_t uuid[16];
@@ -125,6 +141,7 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededNanoseconds = 0;
+        publish_status(AwemeCPUGuardStatusDisabled);
         return;
     }
 
@@ -147,7 +164,10 @@ static void run_aweme_cpu_guard(void) {
             trackedStartTime = 0;
         }
     }
-    if (trackedPID <= 0) return;
+    if (trackedPID <= 0) {
+        publish_status(AwemeCPUGuardStatusWaitingForProcess);
+        return;
+    }
 
     uint64_t currentCPU = 0;
     uint64_t currentWall = monotonic_nanoseconds();
@@ -158,11 +178,13 @@ static void run_aweme_cpu_guard(void) {
         previousCPU = 0;
         previousWall = 0;
         exceededNanoseconds = 0;
+        publish_status(AwemeCPUGuardStatusCPUReadFailed);
         return;
     }
     if (previousWall == 0 || currentWall <= previousWall || currentCPU < previousCPU) {
         previousCPU = currentCPU;
         previousWall = currentWall;
+        publish_status(AwemeCPUGuardStatusMonitoring);
         return;
     }
 
@@ -174,10 +196,13 @@ static void run_aweme_cpu_guard(void) {
 
     if (totalCPUPercent >= threshold) {
         exceededNanoseconds += wallDelta;
+        publish_status(AwemeCPUGuardStatusThresholdExceeded);
         if (exceededNanoseconds >= (uint64_t)duration * kNanosecondsPerSecond &&
             aweme_pid_matches_identity(trackedPID, trackedPath, trackedStartTime)) {
             HBLogInfo(@"AwemeCPUGuard: SIGKILL pid %d; total CPU %.1f%% reached %d%% for %d seconds", trackedPID, totalCPUPercent, threshold, duration);
-            (void)kill(trackedPID, SIGKILL);
+            errno = 0;
+            int killResult = kill(trackedPID, SIGKILL);
+            publish_status(killResult == 0 ? AwemeCPUGuardStatusKilled : AwemeCPUGuardStatusKillFailed);
             trackedPID = 0;
             trackedPath = nil;
             trackedStartTime = 0;
@@ -187,19 +212,21 @@ static void run_aweme_cpu_guard(void) {
         }
     } else {
         exceededNanoseconds = 0;
+        publish_status(AwemeCPUGuardStatusMonitoring);
     }
 }
 
 %ctor {
     @autoreleasepool {
-        if (![[[NSProcessInfo processInfo] processName] isEqualToString:@"runningboardd"]) return;
+        if (![[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) return;
         dispatch_async(dispatch_get_main_queue(), ^{
             dispatch_queue_t queue = dispatch_queue_create("com.moxuan.awemecpuguard.monitor", DISPATCH_QUEUE_SERIAL);
             gMonitorTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
             dispatch_source_set_timer(gMonitorTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_MSEC * 100);
             dispatch_source_set_event_handler(gMonitorTimer, ^{ @autoreleasepool { run_aweme_cpu_guard(); } });
             dispatch_resume(gMonitorTimer);
-            HBLogInfo(@"AwemeCPUGuard: total CPU monitor started in runningboardd");
+            publish_status(AwemeCPUGuardStatusWaitingForProcess);
+            HBLogInfo(@"AwemeCPUGuard: total CPU monitor started in SpringBoard");
         });
     }
 }

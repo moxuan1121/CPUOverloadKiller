@@ -8,7 +8,7 @@ RootHide 越狱插件：只监控抖音国际/中国版的目标 Bundle ID `com.
 
 当总 CPU **达到或超过**手动设定的阈值并连续保持设定秒数时，插件会再次确认 PID、可执行文件路径、Bundle ID 和进程启动时间仍属于同一个 Aweme 实例，再发送 `SIGKILL`。CPU 低于阈值时，连续计时立即清零。
 
-Bundle ID 直接从目标应用包内的 `Info.plist` 校验，不依赖 runningboardd 中可能不可用的 `LSApplicationProxy`。
+监控器运行在 SpringBoard 中；Bundle ID 直接从目标应用包内的 `Info.plist` 校验，不依赖 runningboardd 中可能不可用的 `LSApplicationProxy`。设置页的“当前状态”可显示等待进程、正在监控、超限计时、终止成功以及系统调用失败。
 
 ## 设置
 
