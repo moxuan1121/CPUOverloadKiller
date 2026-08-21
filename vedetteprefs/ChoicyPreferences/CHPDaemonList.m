@@ -69,11 +69,11 @@
 
 	_loading = YES;
 
-	NSMutableArray<NSURL*>* daemonPlists = [[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/System/Library/LaunchDaemons"] includingPropertiesForKeys:nil options:0 error:nil] mutableCopy];
+	NSMutableArray<NSURL*>* daemonPlists = [([[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/System/Library/LaunchDaemons"] includingPropertiesForKeys:nil options:0 error:nil] ?: @[]) mutableCopy];
 
-	[daemonPlists addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/System/Library/NanoLaunchDaemons"] includingPropertiesForKeys:nil options:0 error:nil]];
+	[daemonPlists addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/System/Library/NanoLaunchDaemons"] includingPropertiesForKeys:nil options:0 error:nil] ?: @[]];
 
-	[daemonPlists addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:VDT_JBROOT_PATH("/Library/LaunchDaemons")] includingPropertiesForKeys:nil options:0 error:nil]];
+	[daemonPlists addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:VDT_JBROOT_PATH("/Library/LaunchDaemons")] includingPropertiesForKeys:nil options:0 error:nil] ?: @[]];
 
 	for(NSURL* daemonPlistURL in [daemonPlists reverseObjectEnumerator])
 	{
@@ -170,7 +170,7 @@
 	DIR *dir;
     struct dirent* dp;
     dir = opendir("/usr/libexec");
-    while ((dp=readdir(dir)) != NULL)
+	while (dir && (dp=readdir(dir)) != NULL)
 	{
         if (!(!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")))
         {
@@ -178,12 +178,11 @@
             if(filename)
 			{
 				NSURL* URL = [NSURL fileURLWithPath:[@"/usr/libexec" stringByAppendingPathComponent:filename]];
-				HBLogDebug(@"added %@", URL);
 				[additionalPotentialDaemons addObject:URL];
 			}
         }
     }
-    closedir(dir);
+	if (dir) closedir(dir);
 
 	/*[additionalPotentialDaemons addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/usr/libexec" isDirectory:YES]
                     includingPropertiesForKeys:nil
@@ -193,12 +192,12 @@
 	[additionalPotentialDaemons addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/usr/bin" isDirectory:YES]
                     includingPropertiesForKeys:nil
                                        options:0
-                                         error:nil]];
+                                         error:nil] ?: @[]];
 
 	[additionalPotentialDaemons addObjectsFromArray:[[NSFileManager defaultManager] contentsOfDirectoryAtURL:[NSURL fileURLWithPath:@"/usr/sbin" isDirectory:YES]
                     includingPropertiesForKeys:nil
                                        options:0
-                                         error:nil]];
+                                         error:nil] ?: @[]];
 
 
 	for(NSURL* URL in additionalPotentialDaemons)
@@ -255,4 +254,3 @@
 }
 
 @end
-

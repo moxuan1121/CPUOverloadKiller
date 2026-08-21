@@ -47,6 +47,9 @@ jobs:
           mkdir -p "$THEOS/sdks/iPhoneOS16.5.sdk/usr/include/libproc"
           cp libproc/libproc.h "$THEOS/sdks/iPhoneOS16.5.sdk/usr/include/libproc/libproc.h"
 
+      - name: Check global guard invariants
+        run: python3 tests/check_global_guard.py
+
       - name: Build package
         run: |
           set -o pipefail

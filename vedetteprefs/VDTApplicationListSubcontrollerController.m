@@ -21,6 +21,8 @@ static UIImage *VDTIcon(NSString *identifier){
 
 @implementation VDTApplicationListSubcontrollerController
 
+- (void)viewWillAppear:(BOOL)animated{ [super viewWillAppear:animated]; if(_specifiers)[self reloadSpecifiers]; }
+
 - (void)viewDidLoad{
     NSMutableArray *apps = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
@@ -75,4 +77,3 @@ static UIImage *VDTIcon(NSString *identifier){
     return nil;
 }
 @end
-

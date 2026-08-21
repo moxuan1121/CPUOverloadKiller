@@ -31,6 +31,12 @@
 
 @implementation CHPDaemonListController
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    if([self valueForKey:@"_specifiers"]) [self reloadSpecifiers];
+}
+
 - (void)viewDidLoad
 {
 	[self applySearchControllerHideWhileScrolling:NO];
@@ -181,4 +187,3 @@ extern NSString* previewStringForSettings(NSDictionary* settings);
 }
 
 @end
-

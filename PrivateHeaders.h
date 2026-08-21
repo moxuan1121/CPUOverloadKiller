@@ -25,6 +25,7 @@
 
 @interface LSApplicationProxy : LSBundleProxy
 +(id)applicationProxyForBundleURL:(NSURL *)bundleURL;
++(id)applicationProxyForIdentifier:(NSString *)identifier;
 @end
 
 @interface LSApplicationWorkspace : NSObject
