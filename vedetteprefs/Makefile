@@ -7,7 +7,7 @@ endif
 include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = GlobalCPUGuardPrefs
-GlobalCPUGuardPrefs_FILES = VDTRootListController.m VDTApplicationListSubcontrollerController.m VDTProcessConfiguration.m ../VDTShared.mm isosversion_stub.m \
+GlobalCPUGuardPrefs_FILES = VDTRootListController.m VDTApplicationListSubcontrollerController.m VDTProcessConfiguration.m GCGTargetCell.m ../VDTShared.mm isosversion_stub.m \
     ChoicyPreferences/CHPListController.m ChoicyPreferences/CHPDaemonInfo.m ChoicyPreferences/CHPDaemonList.m ChoicyPreferences/CHPDaemonListController.m
 GlobalCPUGuardPrefs_FRAMEWORKS = UIKit
 GlobalCPUGuardPrefs_PRIVATE_FRAMEWORKS = Preferences

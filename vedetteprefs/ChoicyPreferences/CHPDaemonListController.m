@@ -23,6 +23,7 @@
 #import "CHPDaemonInfo.h"
 #import "CHPDaemonList.h"
 #import "../VDTProcessConfiguration.h"
+#import "../GCGTargetCell.h"
 #import "../../VDTShared.h"
 
 @interface PSListController()
@@ -105,7 +106,9 @@
 				{
 					if(_searchKey && ![_searchKey isEqualToString:@""])
 					{
-						if(![[info displayName] localizedStandardContainsString:_searchKey])
+						if(![[info displayName] localizedStandardContainsString:_searchKey] &&
+						   ![info.plistIdentifier localizedStandardContainsString:_searchKey] &&
+						   ![info.executablePath.lastPathComponent localizedStandardContainsString:_searchKey])
 						{
 							continue;
 						}
@@ -119,10 +122,13 @@
 								cell:PSLinkListCell
 								edit:nil];
                     [specifier setProperty:@(VDTConfigTypeDaemon) forKey:@"configurationType"];
+					[specifier setProperty:GCGTargetCell.class forKey:@"cellClass"];
 
 					[specifier setProperty:@YES forKey:@"enabled"];
 					[specifier setProperty:[info displayName] forKey:@"daemonName"];
 					[specifier setProperty:info forKey:@"daemonInfo"];
+					[specifier setProperty:(info.plistIdentifier.length?info.plistIdentifier:info.executablePath.lastPathComponent) forKey:@"subtitle"];
+					[specifier setProperty:GCGDaemonIcon() forKey:@"iconImage"];
 
 					[specifiers addObject:specifier];
 				}

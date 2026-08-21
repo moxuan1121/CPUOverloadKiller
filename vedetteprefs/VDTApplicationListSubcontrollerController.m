@@ -1,5 +1,6 @@
 #import "VDTApplicationListSubcontrollerController.h"
 #import "VDTProcessConfiguration.h"
+#import "GCGTargetCell.h"
 #import "../PrivateHeaders.h"
 #import "../VDTShared.h"
 #import <objc/message.h>
@@ -16,7 +17,7 @@ static UIImage *VDTIcon(NSString *identifier){
     SEL selector = NSSelectorFromString(@"_applicationIconImageForBundleIdentifier:format:scale:");
     if (![UIImage respondsToSelector:selector]) return nil;
     typedef UIImage *(*IconFunction)(id, SEL, NSString *, NSInteger, CGFloat);
-    return ((IconFunction)objc_msgSend)(UIImage.class, selector, identifier, 2, UIScreen.mainScreen.scale);
+    return GCGResizeIcon(((IconFunction)objc_msgSend)(UIImage.class, selector, identifier, 2, UIScreen.mainScreen.scale));
 }
 
 @implementation VDTApplicationListSubcontrollerController
@@ -53,8 +54,10 @@ static UIImage *VDTIcon(NSString *identifier){
             PSSpecifier *specifier = [PSSpecifier preferenceSpecifierNamed:name target:self set:nil
                 get:@selector(previewStringForSpecifier:) detail:[VDTProcessConfiguration class]
                 cell:PSLinkListCell edit:nil];
+            [specifier setProperty:GCGTargetCell.class forKey:@"cellClass"];
             [specifier setProperty:identifier forKey:@"applicationIdentifier"];
             [specifier setProperty:@(VDTConfigTypeApp) forKey:@"configurationType"];
+            [specifier setProperty:identifier forKey:@"subtitle"];
             UIImage *icon = VDTIcon(identifier);
             if (icon) [specifier setProperty:icon forKey:@"iconImage"];
             [result addObject:specifier];

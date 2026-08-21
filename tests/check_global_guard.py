@@ -6,6 +6,8 @@ common = (root / "Common.h").read_text(encoding="utf-8")
 config = (root / "vedetteprefs/VDTProcessConfiguration.m").read_text(encoding="utf-8")
 app_list = (root / "vedetteprefs/VDTApplicationListSubcontrollerController.m").read_text(encoding="utf-8")
 daemon_list = (root / "vedetteprefs/ChoicyPreferences/CHPDaemonListController.m").read_text(encoding="utf-8")
+root_list = (root / "vedetteprefs/VDTRootListController.m").read_text(encoding="utf-8")
+target_cell = (root / "vedetteprefs/GCGTargetCell.m").read_text(encoding="utf-8")
 
 required_core = [
     "proc_pid_rusage", "mach_timebase_info", "DISPATCH_SOURCE_TYPE_PROC",
@@ -25,6 +27,12 @@ assert "刷新当前状态" in config
 assert "_applicationIconImageForBundleIdentifier" in app_list
 assert "UISearch" in (root / "vedetteprefs/ChoicyPreferences/CHPListController.h").read_text(encoding="utf-8")
 assert "VDTProcessConfiguration" in daemon_list
+assert "添加进程" in root_list and "UIAlertControllerStyleActionSheet" in root_list
+assert "GCGIconPointSize = 28.0" in target_cell
+for scale_name in ["GlobalCPUGuard.png", "GlobalCPUGuard@2x.png", "GlobalCPUGuard@3x.png"]:
+    assert (root / "vedetteprefs/Resources" / scale_name).is_file(), f"missing icon asset: {scale_name}"
+for obsolete_name in ["Vedette.png", "PayPal.png", "Reddit.png", "Twitter.png"]:
+    assert not (root / "vedetteprefs/Resources" / obsolete_name).exists(), f"obsolete resource remains: {obsolete_name}"
 assert "sqlite" not in core.lower()
 assert "HBLog" not in core
 
