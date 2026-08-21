@@ -1,4 +1,4 @@
-name: Build AwemeCPUGuard RootHide
+name: Build GlobalCPUGuard RootHide
 
 on:
   workflow_dispatch:
@@ -56,16 +56,16 @@ jobs:
 
       - name: Verify package
         run: |
-          deb="$(find packages -maxdepth 1 -name 'com.moxuan.awemecpuguard_*.deb' -print -quit)"
+          deb="$(find packages -maxdepth 1 -name 'com.moxuan.globalcpuguard_*.deb' -print -quit)"
           test -n "$deb" && test -s "$deb"
-          test "$(dpkg-deb -f "$deb" Package)" = "com.moxuan.awemecpuguard"
+          test "$(dpkg-deb -f "$deb" Package)" = "com.moxuan.globalcpuguard"
           test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64e"
-          dpkg-deb -c "$deb" | grep -q 'AwemeCPUGuard.dylib'
-          dpkg-deb -c "$deb" | grep -q 'AwemeCPUGuardPrefs.bundle/AwemeCPUGuardPrefs'
+          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuard.dylib'
+          dpkg-deb -c "$deb" | grep -q 'GlobalCPUGuardPrefs.bundle/GlobalCPUGuardPrefs'
 
       - name: Upload RootHide deb
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: aweme-cpu-guard-roothide
+          name: global-cpu-guard-roothide
           path: packages/*.deb
           if-no-files-found: error

@@ -3,23 +3,23 @@
 #include <objc/runtime.h>
 #include <roothide.h>
 
-#define VEDETTE_IDENTIFIER @"com.moxuan.awemecpuguard"
+#define VEDETTE_IDENTIFIER @"com.moxuan.globalcpuguard"
 
 static inline NSString *VDTPrefsPath(void) {
     // /var/mobile is the shared user-data volume, not a jailbreak-root path.
     // Applying jbroot() here can make Preferences and SpringBoard observe
     // different files under RootHide and silently fall back to defaults.
-    return @"/var/mobile/Library/Preferences/com.moxuan.awemecpuguard.plist";
+    return @"/var/mobile/Library/Preferences/com.moxuan.globalcpuguard.plist";
 }
 
 static inline NSString *VDTPrefsPathTmp(void) {
-    return @"/var/tmp/com.moxuan.awemecpuguard.plist";
+    return @"/var/tmp/com.moxuan.globalcpuguard.plist";
 }
 
 #define PREFS_PATH VDTPrefsPath()
 #define PREFS_PATH_TMP VDTPrefsPathTmp()
-#define PREFS_CHANGED_NN @"com.moxuan.awemecpuguard.prefschanged"
-#define AWEME_CPU_GUARD_STATUS_NN "com.moxuan.awemecpuguard.status"
+#define PREFS_CHANGED_NN @"com.moxuan.globalcpuguard.prefschanged"
+#define AWEME_CPU_GUARD_STATUS_NN "com.moxuan.globalcpuguard.status"
 #define VDT_JBROOT_PATH(path) jbroot(@(path))
 
 typedef NS_ENUM(uint64_t, AwemeCPUGuardStatus) {
@@ -33,6 +33,32 @@ typedef NS_ENUM(uint64_t, AwemeCPUGuardStatus) {
     AwemeCPUGuardStatusKillFailed = 7,
     AwemeCPUGuardStatusWaitingForForeground = 8,
 };
+
+static inline NSString *GCGStatusNotificationName(NSUInteger type, NSString *identifier) {
+    NSData *data = [identifier dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    const uint8_t *bytes = data.bytes;
+    uint64_t hash = 1469598103934665603ULL;
+    for (NSUInteger index = 0; index < data.length; index++) {
+        hash ^= bytes[index];
+        hash *= 1099511628211ULL;
+    }
+    return [NSString stringWithFormat:@"com.moxuan.globalcpuguard.status.%lu.%016llx",
+            (unsigned long)type, (unsigned long long)hash];
+}
+
+static inline BOOL GCGIdentifierIsProtected(NSString *identifier) {
+    NSString *lower = identifier.lowercaseString;
+    if (!lower.length) return YES;
+    static NSSet *exact;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ exact = [NSSet setWithArray:@[
+        @"launchd", @"springboard", @"backboardd", @"runningboardd", @"kernel_task",
+        @"installd", @"jailbreakd", @"xpcproxy", @"amfid", @"securityd", @"watchdogd",
+        @"com.apple.springboard", @"com.apple.backboardd", @"com.apple.runningboard"
+    ]]; });
+    return [exact containsObject:lower] || [lower containsString:@"roothide"] ||
+        [lower containsString:@"dopamine"] || [lower containsString:@"jailbreak"];
+}
 
 static inline uint64_t AwemeCPUGuardEncodeStatus(AwemeCPUGuardStatus status,
                                                   NSUInteger cpuTenths,

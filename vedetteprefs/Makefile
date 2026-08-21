@@ -6,14 +6,15 @@ endif
 
 include $(THEOS)/makefiles/common.mk
 
-BUNDLE_NAME = AwemeCPUGuardPrefs
-AwemeCPUGuardPrefs_FILES = VDTRootListController.m ../VDTShared.mm isosversion_stub.m
-AwemeCPUGuardPrefs_FRAMEWORKS = UIKit
-AwemeCPUGuardPrefs_PRIVATE_FRAMEWORKS = Preferences
-AwemeCPUGuardPrefs_INSTALL_PATH = /Library/PreferenceBundles
-AwemeCPUGuardPrefs_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)
+BUNDLE_NAME = GlobalCPUGuardPrefs
+GlobalCPUGuardPrefs_FILES = VDTRootListController.m VDTApplicationListSubcontrollerController.m VDTProcessConfiguration.m ../VDTShared.mm isosversion_stub.m \
+    ChoicyPreferences/CHPListController.m ChoicyPreferences/CHPDaemonInfo.m ChoicyPreferences/CHPDaemonList.m ChoicyPreferences/CHPDaemonListController.m
+GlobalCPUGuardPrefs_FRAMEWORKS = UIKit
+GlobalCPUGuardPrefs_PRIVATE_FRAMEWORKS = Preferences
+GlobalCPUGuardPrefs_INSTALL_PATH = /Library/PreferenceBundles
+GlobalCPUGuardPrefs_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-AwemeCPUGuardPrefs_LDFLAGS += -F$(THEOS)/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks
+GlobalCPUGuardPrefs_LDFLAGS += -F$(THEOS)/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks
 endif
 
 include $(THEOS_MAKE_PATH)/bundle.mk
