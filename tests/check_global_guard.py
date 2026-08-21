@@ -25,11 +25,14 @@ for item in ["launchd", "springboard", "runningboardd", "roothide", "dopamine"]:
 assert "后台继续监控" in config
 assert "启用监控" not in config
 assert "低负载采样间隔" in config
-for label, key in [("接近阈值下限", "nearThresholdPercent"), ("接近阈值采样间隔", "nearSampleSeconds"), ("超限采样间隔", "exceedSampleSeconds")]:
+for label, key in [("接近阈值比例", "nearThresholdPercent"), ("接近阈值采样间隔", "nearSampleSeconds"), ("超限采样间隔", "exceedSampleSeconds")]:
     assert label in config and key in config, f"missing configurable sampling field: {label}/{key}"
 for key in ["nearThresholdPercent", "nearSampleSeconds", "exceedSampleSeconds"]:
     assert key in core, f"missing runtime sampling config: {key}"
-assert "percent>=s.nearThreshold" in core
+assert "nearThresholdRatio" in core
+assert "s.threshold*(double)s.nearThresholdRatio/100.0" in core
+assert "percent>=nearBoundary" in core
+assert 'if([key isEqual:@"nearThresholdPercent"]&&n>99)n=99' in config
 assert "s.nearSample" in core and "s.exceedSample" in core
 assert "超限采样间隔不能大于连续超限时间" in config
 assert "刷新当前状态" in config
