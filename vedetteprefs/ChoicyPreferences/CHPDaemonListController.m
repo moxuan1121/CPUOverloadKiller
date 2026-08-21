@@ -22,6 +22,7 @@
 
 #import "CHPDaemonInfo.h"
 #import "CHPDaemonList.h"
+#import "../VDTProcessConfiguration.h"
 #import "../GCGTargetCell.h"
 #import "../../VDTShared.h"
 
@@ -113,7 +114,7 @@
 								target:self
 								set:nil
 								get:nil
-								detail:nil
+								detail:[VDTProcessConfiguration class]
 								cell:PSLinkListCell
 								edit:nil];
                     [specifier setProperty:@(VDTConfigTypeDaemon) forKey:@"configurationType"];

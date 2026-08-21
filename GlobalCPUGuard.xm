@@ -36,9 +36,13 @@ processStartAbsoluteTime, processExitAbsoluteTime; } gcg_rusage_info_v0;
 @property(copy) NSString *expectedPath;
 @property uint64_t start, oldCPU, oldWall, exceeded, due;
 @property BOOL exceeding;
+@property int statusToken;
 @property(nonatomic,strong) dispatch_source_t exitSource;
 @end
-@implementation GCGState @end
+@implementation GCGState
+- (instancetype)init { if((self=[super init]))_statusToken=-1;return self; }
+- (void)dealloc { if(_statusToken>=0)notify_cancel(_statusToken); }
+@end
 static NSMutableDictionary<NSString *, GCGState *> *states;
 static void schedule(uint64_t delay);
 
@@ -64,10 +68,10 @@ static BOOL usage(pid_t pid,uint64_t *cpu,uint64_t *start) {
     if(cpu)*cpu=u.userTime+u.systemTime; if(start)*start=u.processStartAbsoluteTime; return YES;
 }
 static void publish(GCGState *s,AwemeCPUGuardStatus status,double cpu,double exceeded) {
-    NSString *name=GCGStatusNotificationName(s.type,s.identifier); int token=-1;
-    if(notify_register_check(name.UTF8String,&token)!=NOTIFY_STATUS_OK)return;
-    notify_set_state(token,AwemeCPUGuardEncodeStatus(status,(NSUInteger)MAX(0,MIN(cpu*10,16777215)),s.threshold,(NSUInteger)MAX(0,MIN(exceeded*10,65535))));
-    notify_post(name.UTF8String); notify_cancel(token);
+    NSString *name=GCGStatusNotificationName(s.type,s.identifier);
+    if(s.statusToken<0){int token=-1;if(notify_register_check(name.UTF8String,&token)!=NOTIFY_STATUS_OK)return;s.statusToken=token;}
+    notify_set_state(s.statusToken,AwemeCPUGuardEncodeStatus(status,(NSUInteger)MAX(0,MIN(cpu*10,16777215)),s.threshold,(NSUInteger)MAX(0,MIN(exceeded*10,65535))));
+    notify_post(name.UTF8String);
 }
 static void clear_state(GCGState *s) { if(s.exitSource){dispatch_source_cancel(s.exitSource);s.exitSource=nil;}s.pid=0;s.path=nil;s.start=0;s.oldCPU=0;s.oldWall=0;s.exceeded=0;s.exceeding=NO;s.due=0; }
 static void bind_state(GCGState *s,pid_t pid,NSString *path,uint64_t start,uint64_t now){s.pid=pid;s.path=path;s.start=start;s.due=now;
@@ -87,10 +91,10 @@ static void sync_configs(void) {
     for(NSArray *def in defs){VDTConfigType type=[def[0] unsignedIntegerValue];NSArray *list=[prefs[def[1]] isKindOfClass:NSArray.class]?prefs[def[1]]:@[];
         for(NSDictionary *config in list){if(![config isKindOfClass:NSDictionary.class])continue;NSString *identifier=config[def[2]];
             if(!master||!identifier.length||![config[@"enabled"] boolValue]||GCGIdentifierIsProtected(identifier))continue;
-            NSString *key=key_for(type,identifier);[keep addObject:key];GCGState *s=states[key];if(!s){s=[GCGState new];s.identifier=identifier;s.type=type;states[key]=s;}
+            NSString *key=key_for(type,identifier);[keep addObject:key];GCGState *s=states[key];BOOL created=!s;if(created){s=[GCGState new];s.identifier=identifier;s.type=type;states[key]=s;}
             s.threshold=valid(config[@"cpuThreshold"],80,1,1000);s.duration=valid(config[@"durationSeconds"],10,1,3600);s.idle=valid(config[@"idleSampleSeconds"],60,1,3600);s.expectedPath=[config[@"executablePath"] isKindOfClass:NSString.class]?config[@"executablePath"]:nil;
-            s.background=type==VDTConfigTypeDaemon||[config[@"monitorInBackground"] boolValue];}}
-    for(NSString *key in states.allKeys.copy)if(![keep containsObject:key]){clear_state(states[key]);[states removeObjectForKey:key];}
+            s.background=type==VDTConfigTypeDaemon||[config[@"monitorInBackground"] boolValue];if(created)publish(s,(type==VDTConfigTypeApp&&!s.background&&![frontmostID isEqual:identifier])?AwemeCPUGuardStatusWaitingForForeground:AwemeCPUGuardStatusWaitingForProcess,0,0);}}
+    for(NSString *key in states.allKeys.copy)if(![keep containsObject:key]){GCGState *s=states[key];publish(s,AwemeCPUGuardStatusDisabled,0,0);clear_state(s);[states removeObjectForKey:key];}
 }
 static void discover(uint64_t now) {
     BOOL missing=NO;for(GCGState *s in states.allValues)if(!s.pid&&(s.type==VDTConfigTypeDaemon||s.background||[frontmostID isEqual:s.identifier])){missing=YES;break;}if(!missing||now<nextDiscovery)return;nextDiscovery=now+5*NSSEC;

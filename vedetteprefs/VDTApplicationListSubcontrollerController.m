@@ -1,4 +1,5 @@
 #import "VDTApplicationListSubcontrollerController.h"
+#import "VDTProcessConfiguration.h"
 #import "GCGTargetCell.h"
 #import "../PrivateHeaders.h"
 #import "../VDTShared.h"
@@ -42,9 +43,10 @@ static NSString *VDTDisplayName(LSApplicationProxy *proxy){
             if (_searchKey.length && ![name localizedStandardContainsString:_searchKey] &&
                 ![identifier localizedStandardContainsString:_searchKey]) continue;
             PSSpecifier *specifier = [PSSpecifier preferenceSpecifierNamed:name target:self set:nil
-                get:nil detail:nil
+                get:nil detail:[VDTProcessConfiguration class]
                 cell:PSLinkListCell edit:nil];
             [specifier setProperty:GCGTargetCell.class forKey:@"cellClass"];
+            [specifier setProperty:@YES forKey:@"enabled"];
             [specifier setProperty:identifier forKey:@"applicationIdentifier"];
             [specifier setProperty:@(VDTConfigTypeApp) forKey:@"configurationType"];
             [specifier setProperty:identifier forKey:@"subtitle"];

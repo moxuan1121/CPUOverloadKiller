@@ -13,7 +13,7 @@ required_core = [
     "proc_pid_rusage", "mach_timebase_info", "DISPATCH_SOURCE_TYPE_PROC",
     "DISPATCH_PROC_EXIT", "dispatch_source_set_timer", "DISPATCH_TIME_FOREVER",
     "monitorInBackground", "frontmostID", "identity(s)", "kill(s.pid,SIGKILL)",
-    "processStartAbsoluteTime", "expectedPath", "bundle_for_path",
+    "processStartAbsoluteTime", "expectedPath", "bundle_for_path", "statusToken",
 ]
 for item in required_core:
     assert item in core, f"missing core invariant: {item}"
@@ -32,6 +32,8 @@ assert "UISearch" in (root / "vedetteprefs/ChoicyPreferences/CHPListController.h
 assert 'setValueForProcessConfigKey(identifier,@"enabled",@YES' in app_list
 assert 'setValueForProcessConfigKey(identifier,@"enabled",@YES' in daemon_list
 assert "commitEditingStyle" in root_list and '@"enabled",@NO' in root_list
+assert "notify_cancel(token)" not in core
+assert "AwemeCPUGuardStatusWaitingForForeground" in core
 assert "添加进程" in root_list and "UIAlertControllerStyleActionSheet" in root_list
 assert "GCGIconPointSize = 28.0" in target_cell
 for scale_name in ["GlobalCPUGuard.png", "GlobalCPUGuard@2x.png", "GlobalCPUGuard@3x.png"]:
